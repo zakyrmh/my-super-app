@@ -1,36 +1,101 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# My Super App - Personal Resource Planning (PRP) & Assistant
 
-## Getting Started
+**My Super App** is an all-in-one personal management application designed to handle Finance, Health, and Vehicle maintenance in a single ecosystem. It leverages AI (Google Gemini) to automate data entry through OCR (receipts) and Vision (food logging), transforming manual tracking into a seamless experience.
 
-First, run the development server:
+Built with performance and mobile usage in mind (PWA ready).
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 🚀 Features
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 💰 Finance Module (Advanced Tracker)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+- **Multi-Account System:** Track banks, e-wallets, and cash with double-entry logic.
+- **AI-Powered OCR:** Scan shopping receipts, auto-itemize products, and categorize them using Gemini AI.
+- **Smart Flow:** Track fund movements (e.g., Salary -> Bank A -> Investment B).
+- **Debt & Receivables:** Manage lending/borrowing across specific accounts.
+- **Privacy Flag:** Distinguish between personal expenses and "pass-through" transactions (e.g., paying for a friend).
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 🍎 Health Module (AI Nutritionist)
 
-## Learn More
+- **Snap & Log:** Take a photo of your meal; AI estimates calories and nutrition facts.
+- **Daily Dashboard:** Monitor protein, carbs, and fat intake against goals.
 
-To learn more about Next.js, take a look at the following resources:
+### 🚗 Vehicle Module (Fleet Management)
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- **Service Logs:** Track maintenance history (oil change, parts replacement).
+- **Predictive Maintenance:** AI predicts the next service date based on daily mileage.
+- **Fuel Efficiency:** Calculate generic fuel consumption (KM/L).
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛠 Tech Stack
 
-## Deploy on Vercel
+- **Framework:** [Next.js 16+](https://nextjs.org/) (App Router)
+- **Language:** TypeScript
+- **Styling:** Tailwind CSS + [Shadcn UI](https://ui.shadcn.com/)
+- **State Management:** Zustand
+- **Database:** PostgreSQL (via Supabase)
+- **ORM:** Prisma
+- **Auth:** Supabase Auth (Google & Biometrics)
+- **Storage:** Supabase Storage (Images)
+- **AI:** Google Gemini SDK (Generative AI)
+- **Deployment:** Vercel
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## ⚙️ Getting Started
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Prerequisites
+
+- Node.js 20+
+- npm / yarn / pnpm
+- Supabase Account
+- Google Gemini API Key
+
+### Installation
+
+1. **Clone the repository**
+
+   ```bash
+   git clone https://github.com/zakyrmh/my-super-app.git
+   cd my-super-app
+   ```
+
+2. **Install dependencies**
+
+   ```bash
+   npm install
+   ```
+
+3. **Environment Setup Create a `.env.local` file in the root directory:**
+
+   ```bash
+   # Supabase
+   NEXT_PUBLIC_SUPABASE_URL="your_supabase_url"
+   NEXT_PUBLIC_SUPABASE_ANON_KEY="your_supabase_anon_key"
+
+   # Database (Transaction Mode for Prisma)
+   DATABASE_URL="your_postgresql_connection_string"
+
+   # Google AI
+   GEMINI_API_KEY="your_gemini_api_key"
+
+   # Auth
+   NEXTAUTH_URL="http://localhost:3000"
+   NEXTAUTH_SECRET="generate_a_random_secret_here"
+   ```
+
+4. **Database Setup Push the Prisma schema to your Supabase instance:**
+
+   ```bash
+   npx prisma db push
+   ```
+
+5. **Run the Development Server**
+
+   ```bash
+   npm run dev
+   ```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## 📝 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
