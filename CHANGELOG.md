@@ -38,3 +38,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Header:** Added header component with user profile and navigation links.
 - **Sidebar:** Created sidebar component with collapsible functionality.
 - **Bottom Navigation:** Implemented bottom navigation for mobile devices.
+
+## [0.3.0] - 2026-01-12
+
+### Added
+
+- **Transaction:** Implemented transaction form with itemized expense support.
+
+### Changed
+
+- **Schema:** added 'TransactionFunding' model.
