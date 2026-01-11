@@ -3,8 +3,13 @@
 import * as React from "react";
 import { Moon, Sun } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
-export function ThemeToggle() {
+interface ThemeToggleProps {
+  className?: string;
+}
+
+export function ThemeToggle({ className }: ThemeToggleProps) {
   const [theme, setTheme] = React.useState<"light" | "dark">("light");
 
   React.useEffect(() => {
@@ -35,7 +40,10 @@ export function ThemeToggle() {
       variant="ghost"
       size="icon"
       onClick={toggleTheme}
-      className="absolute top-4 right-4 size-9 rounded-full transition-all hover:bg-accent"
+      className={cn(
+        "size-9 rounded-full transition-all hover:bg-accent",
+        className
+      )}
       aria-label={`Switch to ${theme === "light" ? "dark" : "light"} mode`}
     >
       <Sun className="size-4 rotate-0 scale-100 transition-all dark:-rotate-90 dark:scale-0" />

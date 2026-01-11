@@ -18,7 +18,7 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-background relative overflow-hidden">
       {/* Theme Toggle */}
-      <ThemeToggle />
+      <ThemeToggle className="absolute top-4 right-4" />
 
       {/* Subtle background elements */}
       <div className="absolute inset-0 -z-10">
