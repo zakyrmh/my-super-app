@@ -5,13 +5,41 @@ import { Bell, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { type UserData } from "@/components/dashboard/dashboard-layout-client";
 
 interface HeaderProps {
   onMenuClick?: () => void;
+  user: UserData;
 }
 
-export function Header({ onMenuClick }: HeaderProps) {
+/**
+ * Generates initials from a name or email.
+ * - "John Doe" -> "JD"
+ * - "john.doe@example.com" -> "JO" (first two characters of email)
+ */
+function getInitials(name: string | null, email: string | null): string {
+  if (name) {
+    const parts = name.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+    // Single word name - use first two characters
+    return name.slice(0, 2).toUpperCase();
+  }
+
+  if (email) {
+    return email.slice(0, 2).toUpperCase();
+  }
+
+  return "??";
+}
+
+export function Header({ onMenuClick, user }: HeaderProps) {
   const [greeting, setGreeting] = React.useState("Hello");
+
+  // Compute display name and initials
+  const displayName = user.name ?? user.email ?? "User";
+  const initials = getInitials(user.name, user.email);
 
   React.useEffect(() => {
     const hour = new Date().getHours();
@@ -47,7 +75,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               {greeting} 👋
             </span>
             <span className="text-sm font-semibold text-foreground">
-              John Doe
+              {displayName}
             </span>
           </div>
         </div>
@@ -66,8 +94,12 @@ export function Header({ onMenuClick }: HeaderProps) {
 
           {/* Avatar - Hidden on mobile */}
           <Avatar className="hidden md:flex size-9 border-2 border-border">
-            <AvatarImage src="/avatar-placeholder.png" alt="John Doe" />
-            <AvatarFallback className="text-xs font-medium">JD</AvatarFallback>
+            {user.avatarUrl && (
+              <AvatarImage src={user.avatarUrl} alt={displayName} />
+            )}
+            <AvatarFallback className="text-xs font-medium">
+              {initials}
+            </AvatarFallback>
           </Avatar>
         </div>
       </div>

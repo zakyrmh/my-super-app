@@ -5,11 +5,22 @@ import { Sidebar } from "@/components/dashboard/sidebar";
 import { BottomNav } from "@/components/dashboard/bottom-nav";
 import { Header } from "@/components/dashboard/header";
 
-export default function DashboardLayout({
-  children,
-}: {
+/** User data extracted from Supabase auth session */
+export interface UserData {
+  name: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+}
+
+interface DashboardLayoutClientProps {
   children: React.ReactNode;
-}) {
+  user: UserData;
+}
+
+export function DashboardLayoutClient({
+  children,
+  user,
+}: DashboardLayoutClientProps) {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
 
   return (
@@ -23,7 +34,7 @@ export default function DashboardLayout({
       {/* Main Content Area - Scrollable */}
       <div className="flex-1 flex flex-col h-full overflow-hidden">
         {/* Header - Sticky at top */}
-        <Header />
+        <Header user={user} />
 
         {/* Page Content - Only this area scrolls */}
         <main className="flex-1 overflow-y-auto">
