@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Health:** Food image recognition module.
 - **Vehicle:** Predictive maintenance logic based on mileage.
 
-## [0.1.0] - 2024-01-10
+## [0.1.0] - 2026-01-10
 
 ### Added
 
@@ -29,3 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Configured Environment variables for Supabase and Database connections.
+
+## [0.2.0] - 2026-01-11
+
+### Added
+
+- **Dashboard:** Implemented dashboard layout with sidebar and bottom navigation.
+- **Header:** Added header component with user profile and navigation links.
+- **Sidebar:** Created sidebar component with collapsible functionality.
+- **Bottom Navigation:** Implemented bottom navigation for mobile devices.
