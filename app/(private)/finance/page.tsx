@@ -29,6 +29,7 @@ import {
   CashflowChart,
   AccountCard,
   AccountFormSheet,
+  TransactionFormSheet,
 } from "@/components/finance";
 
 export const metadata: Metadata = {
@@ -261,10 +262,7 @@ export default async function FinancePage() {
             Kelola dan lacak semua transaksi keuangan Anda
           </p>
         </div>
-        <Button className="w-full md:w-auto gap-2">
-          <Plus className="size-4" />
-          Tambah Transaksi
-        </Button>
+        <TransactionFormSheet />
       </div>
 
       {/* ======================== */}

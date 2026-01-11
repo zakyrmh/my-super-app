@@ -79,9 +79,19 @@ model Transaction {
   toAccount     Account? @relation("ReceiverAccount", fields: [toAccountId], references: [id])
 
   // Relasi Item (Belanja Supermarket)
-  items TransactionItem[]
+  items    TransactionItem[]
+  fundings TransactionFunding[]
 
   createdAt DateTime @default(now())
+}
+
+model TransactionFunding {
+  id        String  @id @default(uuid())
+  amount    Decimal // Nominal yang diambil (misal: 500.000)
+  sourceTag String // Nama Tag (misal: "Gaji")
+
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
 }
 
 enum TransactionType {
