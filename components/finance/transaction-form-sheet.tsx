@@ -41,6 +41,13 @@ import {
   type AccountOption,
 } from "@/app/(private)/finance/actions";
 import { type TagBalance } from "@/lib/finance/smart-allocation";
+import {
+  suggestCategory,
+  saveNewCategory,
+  getUserCategories,
+  type CategorySuggestion,
+} from "@/app/actions/category-ai";
+import { Sparkles, Save, X } from "lucide-react";
 
 // ========================
 // TYPE DEFINITIONS
@@ -742,6 +749,21 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
   const isExpense = form.type === "EXPENSE";
   const isTransfer = form.type === "TRANSFER";
 
+  // Handle input changes
+  const handleChange = React.useCallback(
+    (field: keyof FormState, value: string | boolean) => {
+      setForm((prev) => ({ ...prev, [field]: value }));
+      // Clear error when user starts typing
+      setErrors((prev) => {
+        if (field in prev) {
+          return { ...prev, [field]: undefined };
+        }
+        return prev;
+      });
+    },
+    []
+  );
+
   // Fetch accounts when sheet opens
   React.useEffect(() => {
     if (open) {
@@ -800,6 +822,106 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       setTagBalances([]);
     }
   }, [form.fromAccountId, isExpense, isTransfer]);
+
+  // ========================
+  // AI & CATEGORY LOGIC
+  // ========================
+
+  const [dbCategories, setDbCategories] = React.useState<string[]>([]);
+  const [aiSuggestion, setAiSuggestion] =
+    React.useState<CategorySuggestion | null>(null);
+  const [isAiLoading, setIsAiLoading] = React.useState(false);
+  const [newCategoryName, setNewCategoryName] = React.useState("");
+  const [showNewCategoryInput, setShowNewCategoryInput] = React.useState(false);
+  const [isSavingCategory, setIsSavingCategory] = React.useState(false);
+
+  // Load categories from DB
+  React.useEffect(() => {
+    if (open && (isIncome || isExpense)) {
+      getUserCategories(form.type as TransactionType).then((cats) => {
+        setDbCategories(cats);
+      });
+    }
+  }, [open, form.type, isIncome, isExpense]);
+
+  // Merge default and db categories
+  const categoryOptions = React.useMemo(() => {
+    const defaults = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    const combined = Array.from(new Set([...defaults, ...dbCategories])).sort();
+    return combined;
+  }, [isIncome, dbCategories]);
+
+  // AI Suggestion on Description Change
+  React.useEffect(() => {
+    const description = form.description;
+    if (!description || description.length < 3 || !(isIncome || isExpense)) {
+      setAiSuggestion(null);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsAiLoading(true);
+      try {
+        const suggestion = await suggestCategory(
+          description,
+          form.type as TransactionType
+        );
+
+        if (suggestion) {
+          setAiSuggestion(suggestion);
+
+          // If strict match existing, auto-select
+          if (!suggestion.isNew && suggestion.confidence > 0.9) {
+            handleChange("category", suggestion.category);
+          }
+
+          // If new, prep the name but don't force it yet
+          if (suggestion.isNew) {
+            setNewCategoryName(suggestion.category);
+            setShowNewCategoryInput(true);
+          }
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setIsAiLoading(false);
+      }
+    }, 1200); // 1.2s debounce to avoid spamming AI
+
+    return () => clearTimeout(timer);
+  }, [form.description, form.type, isIncome, isExpense, handleChange]);
+
+  const handleSaveCategory = async () => {
+    if (!newCategoryName.trim()) return;
+
+    setIsSavingCategory(true);
+    try {
+      await saveNewCategory(
+        newCategoryName,
+        form.type as TransactionType,
+        aiSuggestion?.keywords || []
+      );
+
+      // Refresh list
+      const cats = await getUserCategories(form.type as TransactionType);
+      setDbCategories(cats);
+
+      // Select it
+      handleChange("category", newCategoryName);
+
+      // Reset UI state
+      setShowNewCategoryInput(false);
+      setServerMessage({
+        type: "success",
+        text: `Kategori "${newCategoryName}" berhasil disimpan!`,
+      });
+      setTimeout(() => setServerMessage(null), 3000);
+    } catch {
+      setServerMessage({ type: "error", text: "Gagal menyimpan kategori" });
+    } finally {
+      setIsSavingCategory(false);
+    }
+  };
 
   // Validate form
   const validateForm = (): boolean => {
@@ -932,23 +1054,11 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     }
   };
 
-  // Handle input changes
-  const handleChange = (field: keyof FormState, value: string | boolean) => {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    // Clear error when user starts typing
-    if (field in errors) {
-      setErrors((prev) => ({ ...prev, [field]: undefined }));
-    }
-  };
-
   // Handle currency input
   const handleAmountChange = (value: string) => {
     const formatted = formatCurrencyInput(value);
     handleChange("amount", formatted);
   };
-
-  // Get categories based on transaction type
-  const categoryOptions = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -1261,29 +1371,110 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
 
           {/* Category - Only for INCOME and EXPENSE */}
           {(isIncome || isExpense) && (
-            <div className="space-y-2">
-              <Label htmlFor="category">Kategori</Label>
-              <Select
-                value={form.category}
-                onValueChange={(value: string) =>
-                  handleChange("category", value)
-                }
-                disabled={isSubmitting}
-              >
-                <SelectTrigger id="category">
-                  <SelectValue placeholder="Pilih kategori" />
-                </SelectTrigger>
-                <SelectContent>
-                  {categoryOptions.map((cat) => (
-                    <SelectItem key={cat} value={cat}>
-                      {cat}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-2 p-3 border rounded-lg bg-muted/10">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="category" className="flex items-center gap-2">
+                  Kategori
+                  {isAiLoading && (
+                    <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
+                      <Sparkles className="size-3" /> AI checking...
+                    </span>
+                  )}
+                </Label>
+
+                {/* Toggle Manual New Category */}
+                {!showNewCategoryInput && (
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCategoryInput(true)}
+                    className="text-xs text-primary hover:underline"
+                  >
+                    + Buat Baru
+                  </button>
+                )}
+              </div>
+
+              {/* Selection Mode */}
+              {!showNewCategoryInput ? (
+                <Select
+                  value={form.category}
+                  onValueChange={(value: string) =>
+                    handleChange("category", value)
+                  }
+                  disabled={isSubmitting}
+                >
+                  <SelectTrigger id="category">
+                    <SelectValue placeholder="Pilih kategori" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categoryOptions.map((cat) => (
+                      <SelectItem key={cat} value={cat}>
+                        {cat}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                /* New Category Mode */
+                <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
+                  <div className="flex gap-2">
+                    <Input
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      placeholder="Nama Kategori Baru"
+                      className="flex-1"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setShowNewCategoryInput(false)}
+                      title="Batal"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                  {/* AI Hint if available */}
+                  {aiSuggestion?.isNew && (
+                    <p className="text-xs text-muted-foreground flex items-center gap-1">
+                      <Sparkles className="size-3 text-amber-500" />
+                      Saran AI: {aiSuggestion.category}
+                    </p>
+                  )}
+
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="w-full gap-2"
+                    onClick={handleSaveCategory}
+                    disabled={isSavingCategory || !newCategoryName}
+                  >
+                    {isSavingCategory ? (
+                      <Loader2 className="size-3 animate-spin" />
+                    ) : (
+                      <Save className="size-3" />
+                    )}
+                    Simpan ke Database
+                  </Button>
+                </div>
+              )}
+
+              {/* AI Insight Message */}
+              {!showNewCategoryInput &&
+                aiSuggestion &&
+                !aiSuggestion.isNew &&
+                form.description.length > 3 && (
+                  <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1">
+                    <Sparkles className="size-3" />
+                    AI: Cocok dengan kategori &quot;{aiSuggestion.category}
+                    &quot;
+                  </div>
+                )}
+
               {/* Show auto-generated flowTag preview for INCOME */}
               {isIncome && (
-                <p className="text-xs text-muted-foreground">
+                <p className="text-xs text-muted-foreground mt-1">
                   Label sumber dana:{" "}
                   <span className="font-medium text-primary">
                     {generateFlowTag(form.category, form.description)}
