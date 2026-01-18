@@ -22,6 +22,8 @@ import {
   TrendingUp,
   TrendingDown,
   Inbox,
+  HandCoins,
+  Handshake,
 } from "lucide-react";
 import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { id as localeId } from "date-fns/locale";
@@ -30,7 +32,10 @@ import {
   AccountCard,
   AccountFormSheet,
   TransactionFormSheet,
+  DebtFormSheet,
+  DebtList,
 } from "@/components/finance";
+import type { DebtWithContact } from "@/app/(private)/finance/debt-actions";
 
 export const metadata: Metadata = {
   title: "Keuangan | My Super App",
@@ -123,7 +128,7 @@ export default async function FinancePage() {
   const sevenDaysAgo = subDays(today, 6);
 
   // 3. Parallel data fetching with Promise.all
-  const [accounts, transactions, monthlyStats, chartTransactions] =
+  const [accounts, transactions, monthlyStats, chartTransactions, activeDebts] =
     await Promise.all([
       // a. All user accounts with balance
       prisma.account.findMany({
@@ -187,6 +192,23 @@ export default async function FinancePage() {
           amount: true,
         },
       }),
+
+      // e. Active debts (hutang/piutang)
+      prisma.debt.findMany({
+        where: {
+          userId,
+          isPaid: false,
+        },
+        include: {
+          contact: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
     ]);
 
   // 4. Process Data
@@ -204,6 +226,27 @@ export default async function FinancePage() {
   const monthlyExpense = Number(
     monthlyStats.find((s) => s.type === "EXPENSE")?._sum.amount ?? 0
   );
+
+  // d. Process debt data
+  const formattedDebts: DebtWithContact[] = activeDebts.map((debt) => ({
+    id: debt.id,
+    type: debt.type as "LENDING" | "BORROWING",
+    amount: Number(debt.amount),
+    remaining: Number(debt.remaining),
+    description: debt.description,
+    dueDate: debt.dueDate,
+    isPaid: debt.isPaid,
+    createdAt: debt.createdAt,
+    contact: debt.contact,
+  }));
+
+  // e. Calculate debt summary
+  const totalLending = formattedDebts
+    .filter((d) => d.type === "LENDING")
+    .reduce((sum, d) => sum + d.remaining, 0);
+  const totalBorrowing = formattedDebts
+    .filter((d) => d.type === "BORROWING")
+    .reduce((sum, d) => sum + d.remaining, 0);
 
   // c. Build chart data (group by date)
   const chartDataMap = new Map<string, { income: number; expense: number }>();
@@ -263,7 +306,10 @@ export default async function FinancePage() {
             Kelola dan lacak semua transaksi keuangan Anda
           </p>
         </div>
-        <TransactionFormSheet />
+        <div className="flex gap-2">
+          <TransactionFormSheet />
+          <DebtFormSheet />
+        </div>
       </div>
 
       {/* ======================== */}
@@ -348,6 +394,46 @@ export default async function FinancePage() {
         <div className="md:col-span-2 lg:col-span-1">
           <CashflowChart data={chartData} />
         </div>
+
+        {/* Piutang Card */}
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Piutang
+            </CardTitle>
+            <div className="flex items-center justify-center size-9 rounded-xl bg-emerald-100 dark:bg-emerald-500/20">
+              <HandCoins className="size-5 text-emerald-600 dark:text-emerald-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+              {formatCurrency(totalLending)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Uang yang dipinjamkan ke orang lain
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Hutang Card */}
+        <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Hutang
+            </CardTitle>
+            <div className="flex items-center justify-center size-9 rounded-xl bg-orange-100 dark:bg-orange-500/20">
+              <Handshake className="size-5 text-orange-600 dark:text-orange-400" />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+              {formatCurrency(totalBorrowing)}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Uang yang dipinjam dari orang lain
+            </p>
+          </CardContent>
+        </Card>
       </div>
 
       {/* ======================== */}
@@ -397,7 +483,35 @@ export default async function FinancePage() {
       </div>
 
       {/* ======================== */}
-      {/* SECTION 4: Transaction History */}
+      {/* SECTION 4: Hutang & Piutang */}
+      {/* ======================== */}
+      <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base font-semibold">
+              Hutang & Piutang
+            </CardTitle>
+            <DebtFormSheet
+              trigger={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-primary gap-1"
+                >
+                  <Plus className="size-3" />
+                  Catat Pinjaman
+                </Button>
+              }
+            />
+          </div>
+        </CardHeader>
+        <CardContent>
+          <DebtList debts={formattedDebts} />
+        </CardContent>
+      </Card>
+
+      {/* ======================== */}
+      {/* SECTION 5: Transaction History */}
       {/* ======================== */}
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-3">
