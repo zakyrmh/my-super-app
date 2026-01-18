@@ -364,17 +364,45 @@ export async function createTransaction(
       }
     }
 
-    // 6. Create transaction and update balances in a transaction
+    // 6. Resolve Category (Find or Create)
+    let finalCategoryId: string | null = null;
+    if (input.category) {
+      const categoryName = input.category.trim();
+      const existingCategory = await prisma.category.findFirst({
+        where: {
+          userId: user.id,
+          name: { equals: categoryName, mode: "insensitive" },
+          type: input.type,
+        },
+      });
+
+      if (existingCategory) {
+        finalCategoryId = existingCategory.id;
+      } else {
+        const newCategory = await prisma.category.create({
+          data: {
+            name: categoryName,
+            type: input.type,
+            userId: user.id,
+            keywords: [categoryName.toLowerCase()],
+          },
+        });
+        finalCategoryId = newCategory.id;
+      }
+    }
+
+    // 7. Create transaction and update balances in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Create the transaction record
       // Note: For EXPENSE, flowTag is NOT set (funding comes from multiple sources)
       const transaction = await tx.transaction.create({
         data: {
+          userId: user.id,
           type: input.type,
           amount: input.amount,
           date: input.date ? new Date(input.date) : new Date(),
           description: input.description?.trim() || null,
-          category: input.category?.trim() || null,
+          categoryId: finalCategoryId,
           fromAccountId: input.fromAccountId || null,
           toAccountId: input.toAccountId || null,
           isPersonal: input.isPersonal ?? true,
@@ -411,15 +439,44 @@ export async function createTransaction(
 
         // Create TransactionItem records for itemized expenses
         if (input.items && input.items.length > 0) {
-          await tx.transactionItem.createMany({
-            data: input.items.map((item) => ({
-              transactionId: transaction.id,
-              name: item.name,
-              price: item.price,
-              qty: item.qty,
-              category: item.category?.trim() || null,
-            })),
-          });
+          for (const item of input.items) {
+            let itemCategoryId: string | null = null;
+
+            if (item.category) {
+              const iCatName = item.category.trim();
+              const existingItemCat = await tx.category.findFirst({
+                where: {
+                  userId: user.id,
+                  name: { equals: iCatName, mode: "insensitive" },
+                  type: "EXPENSE", // Items are always expenses
+                },
+              });
+
+              if (existingItemCat) {
+                itemCategoryId = existingItemCat.id;
+              } else {
+                const newItemCat = await tx.category.create({
+                  data: {
+                    name: iCatName,
+                    type: "EXPENSE",
+                    userId: user.id,
+                    keywords: [iCatName.toLowerCase()],
+                  },
+                });
+                itemCategoryId = newItemCat.id;
+              }
+            }
+
+            await tx.transactionItem.create({
+              data: {
+                transactionId: transaction.id,
+                name: item.name,
+                price: item.price,
+                qty: item.qty,
+                categoryId: itemCategoryId,
+              },
+            });
+          }
         }
       } else if (
         input.type === "TRANSFER" &&
@@ -440,7 +497,7 @@ export async function createTransaction(
       return transaction;
     });
 
-    // 7. Revalidate the finance page
+    // 8. Revalidate the finance page
     revalidatePath("/finance");
 
     // Generate success message based on type

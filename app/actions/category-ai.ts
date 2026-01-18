@@ -3,6 +3,7 @@
 import { createClient } from "@/utils/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { TransactionType } from "@/lib/generated/prisma/client";
+import { GoogleGenAI } from "@google/genai";
 
 export type CategorySuggestion = {
   category: string;
@@ -12,21 +13,21 @@ export type CategorySuggestion = {
   keywords?: string[];
 };
 
+// Output simple string array for suggestions
 export async function suggestCategory(
   description: string,
   type: TransactionType
-): Promise<CategorySuggestion | null> {
-  if (!description || description.trim().length < 3) return null;
+): Promise<string[]> {
+  if (!description || description.trim().length < 3) return [];
 
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (!user) return null;
+  if (!user) return [];
 
-  // 1. Cek database kita dulu (Personalized Learning)
-  // Cari kategori yang punya keyword yang cocok dengan deskripsi
+  // 1. Ambil kategori existing dari DB
   const categories = await prisma.category.findMany({
     where: {
       userId: user.id,
@@ -34,54 +35,54 @@ export async function suggestCategory(
     },
   });
 
-  // Simple keyword matching (bisa ditingkatkan dengan fuzzy search atau vector db nanti)
   const normalizedDesc = description.toLowerCase();
+  const suggestions: Set<string> = new Set();
 
-  // Prioritas 1: Exact match atau contains match pada nama kategori
-  const directMatch = categories.find((c) =>
-    normalizedDesc.includes(c.name.toLowerCase())
-  );
-  if (directMatch) {
-    return { category: directMatch.name, isNew: false, confidence: 1.0 };
-  }
-
-  // Prioritas 2: Match dengan keywords yang tersimpan
+  // 2. Local Matching (Prioritas Utama)
+  // a. Keyword matching
   for (const cat of categories) {
     if (cat.keywords.some((k) => normalizedDesc.includes(k.toLowerCase()))) {
-      return { category: cat.name, isNew: false, confidence: 0.9 };
+      suggestions.add(cat.name);
     }
   }
 
-  // 2. Jika tidak ada di DB, tanya AI (Generative)
+  // b. Name matching
+  for (const cat of categories) {
+    if (normalizedDesc.includes(cat.name.toLowerCase())) {
+      suggestions.add(cat.name);
+    }
+  }
+
+  // Jika sudah ada 3 suggestion dari lokal, kembalikan saja (hemat token AI)
+  if (suggestions.size >= 3) {
+    return Array.from(suggestions).slice(0, 3);
+  }
+
+  // 3. AI Generation (Jika kurang dari 3)
   try {
-    const aiSuggestion = await generateWithGemini(
+    const aiSuggestions = await generateWithGemini(
       description,
       type,
-      categories.map((c) => c.name)
+      categories.map((c) => c.name),
+      3 - suggestions.size // Minta sisa kekurangannya
     );
-    if (aiSuggestion) {
-      // Cek apakah AI menyarankan kategori yang SUDAH ADA (tapi keywordnya belum kita tangkap)
-      const existing = categories.find(
-        (c) => c.name.toLowerCase() === aiSuggestion.category.toLowerCase()
-      );
 
-      if (existing) {
-        // Update keyword otomatis? (Opsional, untuk sekarang kita return existing saja)
-        return { category: existing.name, isNew: false, confidence: 0.8 };
-      }
-
-      return {
-        category: aiSuggestion.category,
-        isNew: true,
-        confidence: 0.8,
-        keywords: aiSuggestion.keywords, // AI juga suggest keywords baru
-      };
-    }
+    aiSuggestions.forEach((s) => suggestions.add(s));
   } catch (error) {
-    console.error("AI Generation failed:", error);
+    console.error("AI Warning:", error);
   }
 
-  return null;
+  // Fallback default jika kosong banget (Local & AI failed)
+  if (suggestions.size === 0) {
+    console.warn("Using Default Fallbacks (AI failed or returned empty)");
+    if (type === "EXPENSE") {
+      ["Lainnya", "Belanja", "Makanan"].forEach((s) => suggestions.add(s));
+    } else {
+      ["Lainnya", "Gaji", "Bonus"].forEach((s) => suggestions.add(s));
+    }
+  }
+
+  return Array.from(suggestions).slice(0, 3);
 }
 
 export async function saveNewCategory(
@@ -96,12 +97,10 @@ export async function saveNewCategory(
 
   if (!user) throw new Error("Unauthorized");
 
-  // Bersihkan keywords kosong
   const validKeywords = keywords
     .map((k) => k.trim())
     .filter((k) => k.length > 0);
 
-  // Pastikan keywords unik
   const uniqueKeywords = Array.from(new Set(validKeywords));
 
   return await prisma.category.create({
@@ -114,75 +113,61 @@ export async function saveNewCategory(
   });
 }
 
-// Helper untuk fetch Gemini API
+// Helper Gemini Updated
 async function generateWithGemini(
   description: string,
   type: TransactionType,
-  existingCategories: string[]
-): Promise<{ category: string; keywords: string[] } | null> {
+  existingCategories: string[],
+  count: number = 3
+): Promise<string[]> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return null;
+  if (!apiKey) return [];
+
+  const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
 Context: Aplikasi keuangan pribadi.
-Task: Tentukan kategori transaksi yang setepat mungkin berdasarkan deskripsi.
-Type: ${type}
-Description: "${description}"
-Existing Categories: ${existingCategories.join(", ")}
+Task: Berikan ${count} rekomendasi kategori untuk transaksi ini.
+
+Type Transaction: ${type === "INCOME" ? "Pemasukan" : "Pengeluaran"}
+Description Transaction: "${description}"
+Existing Categories: ${
+    existingCategories.length > 0 ? existingCategories.join(", ") : "Belum ada"
+  }
 
 Instruksi:
-1. Jika deskripsi cocok dengan salah satu Existing Categories, gunakan itu.
-2. Jika tidak, buat kategori baru yang ringkas (1-2 kata) dan umum (contoh: "Makanan", "Transportasi", "Hiburan").
-3. Berikan juga 2-3 keywords relevan dari deskripsi untuk future matching.
-4. Output JSON only: { "category": "Nama Kategori", "keywords": ["keyword1", "keyword2"] }
+1. Prioritaskan kategori yang sudah ada (Existing Categories) jika relevan.
+2. Jika tidak ada yang cocok, buat nama kategori baru yang umum (1-2 kata).
+3. Output HANYA JSON objekt dengan key "categories" berisi array string.
+   Contoh: { "categories": ["Kategori1", "Kategori2"] }
 `;
 
   try {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: prompt,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.3,
-            maxOutputTokens: 100,
-          },
-        }),
-      }
-    );
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: {
+        temperature: 0.3,
+        responseMimeType: "application/json",
+      },
+    });
 
-    const data = await response.json();
+    const text = response.text;
+    if (!text) return [];
 
-    if (
-      data.candidates &&
-      data.candidates[0].content &&
-      data.candidates[0].content.parts[0].text
-    ) {
-      const text = data.candidates[0].content.parts[0].text;
-      // Clean up markdown json blocks if any
-      const jsonStr = text
-        .replace(/```json/g, "")
-        .replace(/```/g, "")
-        .trim();
-      return JSON.parse(jsonStr);
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed.categories)) {
+      return parsed.categories;
     }
-  } catch (e) {
-    console.error("Gemini API Error:", e);
+    return [];
+  } catch (error) {
+    // Log complete error including cause if available
+    console.error(
+      "Gemini SDK Error:",
+      JSON.stringify(error, Object.getOwnPropertyNames(error))
+    );
+    return [];
   }
-
-  return null;
 }
 
 export async function getUserCategories(type: TransactionType) {

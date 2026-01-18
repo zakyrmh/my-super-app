@@ -49,10 +49,10 @@ export async function signUpWithEmail(
   name: string,
   email: string,
   password: string
-): Promise<AuthResult> {
+): Promise<AuthResult<import("@supabase/supabase-js").User>> {
   const supabase = createClient();
 
-  const { error } = await supabase.auth.signUp({
+  const { data, error } = await supabase.auth.signUp({
     email,
     password,
     options: {
@@ -72,7 +72,7 @@ export async function signUpWithEmail(
     };
   }
 
-  return { data: undefined };
+  return { data: data.user || undefined };
 }
 
 /**

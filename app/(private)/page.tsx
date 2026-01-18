@@ -170,7 +170,7 @@ export default async function HomePage() {
     // d. Recent transactions
     prisma.transaction.findMany({
       where: {
-        fromAccount: { userId },
+        userId,
       },
       orderBy: { createdAt: "desc" },
       take: 3,
@@ -260,7 +260,7 @@ export default async function HomePage() {
     ...recentTransactions.map((tx) => ({
       id: tx.id,
       type: "transaction" as const,
-      category: tx.category || "general",
+      category: tx.category?.name || "general",
       title: tx.description || `${tx.type}`,
       amount: tx.type === "INCOME" ? Number(tx.amount) : -Number(tx.amount),
       createdAt: tx.createdAt,

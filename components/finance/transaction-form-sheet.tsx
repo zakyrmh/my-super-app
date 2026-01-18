@@ -45,9 +45,9 @@ import {
   suggestCategory,
   saveNewCategory,
   getUserCategories,
-  type CategorySuggestion,
 } from "@/app/actions/category-ai";
-import { Sparkles, Save, X } from "lucide-react";
+import { Sparkles, Save, Check, Search } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 // ========================
 // TYPE DEFINITIONS
@@ -828,12 +828,31 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
   // ========================
 
   const [dbCategories, setDbCategories] = React.useState<string[]>([]);
-  const [aiSuggestion, setAiSuggestion] =
-    React.useState<CategorySuggestion | null>(null);
+  const [aiSuggestions, setAiSuggestions] = React.useState<string[]>([]);
   const [isAiLoading, setIsAiLoading] = React.useState(false);
-  const [newCategoryName, setNewCategoryName] = React.useState("");
-  const [showNewCategoryInput, setShowNewCategoryInput] = React.useState(false);
   const [isSavingCategory, setIsSavingCategory] = React.useState(false);
+  const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
+
+  // Merge default and db categories
+  const categoryOptions = React.useMemo(() => {
+    const defaults = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+    const combined = Array.from(new Set([...defaults, ...dbCategories])).sort();
+    return combined;
+  }, [isIncome, dbCategories]);
+
+  // Filter categories based on input
+  const filteredCategories = React.useMemo(() => {
+    if (!form.category) return categoryOptions;
+    return categoryOptions.filter((cat) =>
+      cat.toLowerCase().includes(form.category.toLowerCase())
+    );
+  }, [categoryOptions, form.category]);
+
+  const isNewCategory =
+    form.category.trim().length > 0 &&
+    !categoryOptions.some(
+      (c) => c.toLowerCase() === form.category.trim().toLowerCase()
+    );
 
   // Load categories from DB
   React.useEffect(() => {
@@ -844,42 +863,24 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     }
   }, [open, form.type, isIncome, isExpense]);
 
-  // Merge default and db categories
-  const categoryOptions = React.useMemo(() => {
-    const defaults = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-    const combined = Array.from(new Set([...defaults, ...dbCategories])).sort();
-    return combined;
-  }, [isIncome, dbCategories]);
-
   // AI Suggestion on Description Change
   React.useEffect(() => {
     const description = form.description;
     if (!description || description.length < 3 || !(isIncome || isExpense)) {
-      setAiSuggestion(null);
+      setAiSuggestions([]);
       return;
     }
 
     const timer = setTimeout(async () => {
       setIsAiLoading(true);
       try {
-        const suggestion = await suggestCategory(
+        const suggestions = await suggestCategory(
           description,
           form.type as TransactionType
         );
 
-        if (suggestion) {
-          setAiSuggestion(suggestion);
-
-          // If strict match existing, auto-select
-          if (!suggestion.isNew && suggestion.confidence > 0.9) {
-            handleChange("category", suggestion.category);
-          }
-
-          // If new, prep the name but don't force it yet
-          if (suggestion.isNew) {
-            setNewCategoryName(suggestion.category);
-            setShowNewCategoryInput(true);
-          }
+        if (suggestions && suggestions.length > 0) {
+          setAiSuggestions(suggestions);
         }
       } catch (err) {
         console.error(err);
@@ -889,31 +890,28 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     }, 1200); // 1.2s debounce to avoid spamming AI
 
     return () => clearTimeout(timer);
-  }, [form.description, form.type, isIncome, isExpense, handleChange]);
+  }, [form.description, form.type, isIncome, isExpense]);
 
   const handleSaveCategory = async () => {
-    if (!newCategoryName.trim()) return;
+    if (!form.category.trim()) return;
 
     setIsSavingCategory(true);
     try {
+      // Pass empty array for keywords for now, or fetch new ones if needed.
+      // Since we just save what user typed, strictly keywords are optional/server handled.
       await saveNewCategory(
-        newCategoryName,
+        form.category,
         form.type as TransactionType,
-        aiSuggestion?.keywords || []
+        [] // Keywords not generated explicitly in this flow
       );
 
       // Refresh list
       const cats = await getUserCategories(form.type as TransactionType);
       setDbCategories(cats);
 
-      // Select it
-      handleChange("category", newCategoryName);
-
-      // Reset UI state
-      setShowNewCategoryInput(false);
       setServerMessage({
         type: "success",
-        text: `Kategori "${newCategoryName}" berhasil disimpan!`,
+        text: `Kategori "${form.category}" berhasil disimpan!`,
       });
       setTimeout(() => setServerMessage(null), 3000);
     } catch {
@@ -1369,117 +1367,114 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
             />
           </div>
 
-          {/* Category - Only for INCOME and EXPENSE */}
+          {/* Category - Combobox with AI Suggestions */}
           {(isIncome || isExpense) && (
-            <div className="space-y-2 p-3 border rounded-lg bg-muted/10">
-              <div className="flex items-center justify-between">
+            <div className="space-y-2 p-3 border rounded-lg bg-muted/10 relative">
+              <div className="flex items-center justify-between mb-1">
                 <Label htmlFor="category" className="flex items-center gap-2">
                   Kategori
                   {isAiLoading && (
                     <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
-                      <Sparkles className="size-3" /> AI checking...
+                      <Sparkles className="size-3" /> Rekomendasi AI...
                     </span>
                   )}
                 </Label>
+              </div>
 
-                {/* Toggle Manual New Category */}
-                {!showNewCategoryInput && (
-                  <button
-                    type="button"
-                    onClick={() => setShowNewCategoryInput(true)}
-                    className="text-xs text-primary hover:underline"
-                  >
-                    + Buat Baru
-                  </button>
+              <div className="relative">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    id="category"
+                    value={form.category}
+                    onChange={(e) => {
+                      handleChange("category", e.target.value);
+                      setIsDropdownOpen(true);
+                    }}
+                    onFocus={() => setIsDropdownOpen(true)}
+                    placeholder={
+                      isIncome
+                        ? "Pilih atau ketik kategori pemasukan..."
+                        : "Pilih atau ketik kategori pengeluaran..."
+                    }
+                    className={`pl-9 ${isNewCategory ? "pr-12" : ""}`}
+                    autoComplete="off"
+                    disabled={isSubmitting}
+                  />
+
+                  {/* Simpan Button inside Input */}
+                  {isNewCategory && (
+                    <button
+                      type="button"
+                      onClick={handleSaveCategory}
+                      disabled={isSavingCategory}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                      title="Simpan Kategori Baru"
+                    >
+                      {isSavingCategory ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Save className="size-4" />
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown Menu */}
+                {isDropdownOpen && filteredCategories.length > 0 && (
+                  <div className="absolute z-50 w-full mt-1 max-h-48 overflow-y-auto bg-popover text-popover-foreground border rounded-md shadow-md animate-in fade-in-0 zoom-in-95">
+                    {filteredCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => {
+                          handleChange("category", cat);
+                          setIsDropdownOpen(false);
+                        }}
+                        className="w-full flex items-center px-4 py-2 text-sm hover:bg-accent hover:text-accent-foreground text-left"
+                      >
+                        {cat}
+                        {form.category === cat && (
+                          <Check className="ml-auto size-4 opacity-50" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Backdrop to close dropdown */}
+                {isDropdownOpen && (
+                  <div
+                    className="fixed inset-0 z-40 bg-transparent"
+                    onClick={() => setIsDropdownOpen(false)}
+                  />
                 )}
               </div>
 
-              {/* Selection Mode */}
-              {!showNewCategoryInput ? (
-                <Select
-                  value={form.category}
-                  onValueChange={(value: string) =>
-                    handleChange("category", value)
-                  }
-                  disabled={isSubmitting}
-                >
-                  <SelectTrigger id="category">
-                    <SelectValue placeholder="Pilih kategori" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categoryOptions.map((cat) => (
-                      <SelectItem key={cat} value={cat}>
-                        {cat}
-                      </SelectItem>
+              {/* AI Recommendations */}
+              {aiSuggestions.length > 0 && form.description.length > 3 && (
+                <div className="mt-3">
+                  <p className="text-xs text-muted-foreground mb-2 flex items-center gap-1">
+                    <Sparkles className="size-3 text-amber-500" />
+                    Rekomendasi Kategori:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {aiSuggestions.map((suggestion) => (
+                      <Badge
+                        key={suggestion}
+                        variant="secondary"
+                        className="cursor-pointer hover:bg-primary/10 transition-colors"
+                        onClick={() => {
+                          handleChange("category", suggestion);
+                          // Check if this suggested category exists, if not set new
+                          setIsDropdownOpen(false);
+                        }}
+                      >
+                        {suggestion}
+                      </Badge>
                     ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                /* New Category Mode */
-                <div className="space-y-2 animate-in fade-in slide-in-from-top-1">
-                  <div className="flex gap-2">
-                    <Input
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      placeholder="Nama Kategori Baru"
-                      className="flex-1"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowNewCategoryInput(false)}
-                      title="Batal"
-                    >
-                      <X className="size-4" />
-                    </Button>
                   </div>
-                  {/* AI Hint if available */}
-                  {aiSuggestion?.isNew && (
-                    <p className="text-xs text-muted-foreground flex items-center gap-1">
-                      <Sparkles className="size-3 text-amber-500" />
-                      Saran AI: {aiSuggestion.category}
-                    </p>
-                  )}
-
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="w-full gap-2"
-                    onClick={handleSaveCategory}
-                    disabled={isSavingCategory || !newCategoryName}
-                  >
-                    {isSavingCategory ? (
-                      <Loader2 className="size-3 animate-spin" />
-                    ) : (
-                      <Save className="size-3" />
-                    )}
-                    Simpan ke Database
-                  </Button>
                 </div>
-              )}
-
-              {/* AI Insight Message */}
-              {!showNewCategoryInput &&
-                aiSuggestion &&
-                !aiSuggestion.isNew &&
-                form.description.length > 3 && (
-                  <div className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1 mt-1">
-                    <Sparkles className="size-3" />
-                    AI: Cocok dengan kategori &quot;{aiSuggestion.category}
-                    &quot;
-                  </div>
-                )}
-
-              {/* Show auto-generated flowTag preview for INCOME */}
-              {isIncome && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  Label sumber dana:{" "}
-                  <span className="font-medium text-primary">
-                    {generateFlowTag(form.category, form.description)}
-                  </span>
-                </p>
               )}
             </div>
           )}

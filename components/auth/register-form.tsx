@@ -12,6 +12,7 @@ import {
   signInWithGoogle,
   signInWithGitHub,
 } from "@/lib/supabase/auth";
+import { syncUserToPrisma } from "@/app/actions/auth-actions";
 
 interface RegisterFormProps {
   redirectTo?: string;
@@ -54,6 +55,20 @@ export function RegisterForm({ redirectTo = "/" }: RegisterFormProps) {
       setError(result.error.message);
       setIsLoading(null);
       return;
+    }
+
+    if (result.data) {
+      const syncResult = await syncUserToPrisma({
+        id: result.data.id,
+        email,
+        name,
+      });
+
+      if (!syncResult.success) {
+        setError(syncResult.error || "Failed to create user profile");
+        setIsLoading(null);
+        return;
+      }
     }
 
     // Show success message for email confirmation

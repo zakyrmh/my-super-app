@@ -140,11 +140,12 @@ export default async function FinancePage() {
       // b. Last 20 transactions with account relations
       prisma.transaction.findMany({
         where: {
-          OR: [{ fromAccount: { userId } }, { toAccount: { userId } }],
+          userId,
         },
         include: {
           fromAccount: { select: { id: true, name: true } },
           toAccount: { select: { id: true, name: true } },
+          category: { select: { name: true } },
         },
         orderBy: { date: "desc" },
         take: 20,
@@ -242,7 +243,7 @@ export default async function FinancePage() {
       type: tx.type as "INCOME" | "EXPENSE" | "TRANSFER",
       amount: Number(tx.amount),
       description: tx.description,
-      category: tx.category,
+      category: tx.category?.name || null,
       fromAccount: tx.fromAccount,
       toAccount: tx.toAccount,
     })
