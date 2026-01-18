@@ -48,3 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Schema:** added 'TransactionFunding' model.
+
+## [0.4.0] - 2026-01-18
+
+### Added
+
+- **AI Category Suggestion:** Implemented AI category suggestion for transactions.
