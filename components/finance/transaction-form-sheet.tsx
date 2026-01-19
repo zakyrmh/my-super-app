@@ -136,30 +136,6 @@ const TRANSACTION_TYPES: {
 ];
 
 // ========================
-// COMMON CATEGORIES
-// ========================
-
-const EXPENSE_CATEGORIES = [
-  "Makanan & Minuman",
-  "Transportasi",
-  "Belanja",
-  "Tagihan & Utilitas",
-  "Hiburan",
-  "Kesehatan",
-  "Pendidikan",
-  "Lainnya",
-];
-
-const INCOME_CATEGORIES = [
-  "Gaji",
-  "Bonus",
-  "Investasi",
-  "Hadiah",
-  "Penjualan",
-  "Lainnya",
-];
-
-// ========================
 // HELPER FUNCTIONS
 // ========================
 
@@ -1021,12 +997,10 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
   const [isSavingCategory, setIsSavingCategory] = React.useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
 
-  // Merge default and db categories
+  // Category options from database only
   const categoryOptions = React.useMemo(() => {
-    const defaults = isIncome ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
-    const combined = Array.from(new Set([...defaults, ...dbCategories])).sort();
-    return combined;
-  }, [isIncome, dbCategories]);
+    return [...dbCategories].sort();
+  }, [dbCategories]);
 
   // Filter categories based on input
   const filteredCategories = React.useMemo(() => {

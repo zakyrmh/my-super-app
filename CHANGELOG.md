@@ -61,3 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **AI Item Category Suggestion:** Implemented AI category suggestion for transaction items.
+
+### Changed
+
+- **Category:** Only show categories from database.
