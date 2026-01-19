@@ -513,12 +513,199 @@ interface ExpenseItemsEditorProps {
   items: ExpenseItem[];
   onItemsChange: (items: ExpenseItem[]) => void;
   disabled: boolean;
+  categoryOptions: string[];
+  onSaveCategory: (category: string) => Promise<void>;
+}
+
+// Individual Item Category Input with AI suggestions
+interface ItemCategoryInputProps {
+  itemId: string;
+  itemName: string;
+  category: string;
+  onCategoryChange: (category: string) => void;
+  disabled: boolean;
+  categoryOptions: string[];
+  onSaveCategory: (category: string) => Promise<void>;
+}
+
+function ItemCategoryInput({
+  itemId,
+  itemName,
+  category,
+  onCategoryChange,
+  disabled,
+  categoryOptions,
+  onSaveCategory,
+}: ItemCategoryInputProps) {
+  const [isDropdownOpen, setIsDropdownOpen] = React.useState(false);
+  const [aiSuggestions, setAiSuggestions] = React.useState<string[]>([]);
+  const [isAiLoading, setIsAiLoading] = React.useState(false);
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  // Filter categories based on input
+  const filteredCategories = React.useMemo(() => {
+    if (!category) return categoryOptions;
+    return categoryOptions.filter((cat) =>
+      cat.toLowerCase().includes(category.toLowerCase())
+    );
+  }, [categoryOptions, category]);
+
+  // Check if it's a new category
+  const isNewCategory =
+    category.trim().length > 0 &&
+    !categoryOptions.some(
+      (c) => c.toLowerCase() === category.trim().toLowerCase()
+    );
+
+  // AI Suggestion based on item name (debounced)
+  React.useEffect(() => {
+    if (!itemName || itemName.length < 3) {
+      setAiSuggestions([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      setIsAiLoading(true);
+      try {
+        const suggestions = await suggestCategory(itemName, "EXPENSE");
+        if (suggestions && suggestions.length > 0) {
+          setAiSuggestions(suggestions);
+        } else {
+          setAiSuggestions([]);
+        }
+      } catch (err) {
+        console.error("Item category AI error:", err);
+        setAiSuggestions([]);
+      } finally {
+        setIsAiLoading(false);
+      }
+    }, 1200);
+
+    return () => clearTimeout(timer);
+  }, [itemName]);
+
+  const handleSaveCategory = async () => {
+    if (!category.trim()) return;
+    setIsSaving(true);
+    try {
+      await onSaveCategory(category);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-1 mb-1">
+        <span className="text-xs text-muted-foreground">Kategori</span>
+        {isAiLoading && (
+          <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1">
+            <Sparkles className="size-2.5" />
+          </span>
+        )}
+      </div>
+      <div className="relative">
+        <div className="relative">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground" />
+          <input
+            type="text"
+            value={category}
+            onChange={(e) => {
+              onCategoryChange(e.target.value);
+              setIsDropdownOpen(true);
+            }}
+            onFocus={() => setIsDropdownOpen(true)}
+            placeholder="Ketik atau pilih kategori..."
+            disabled={disabled}
+            className={`w-full pl-7 pr-${
+              isNewCategory ? "9" : "3"
+            } py-1.5 text-xs rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-50`}
+            autoComplete="off"
+          />
+
+          {/* Save button for new category */}
+          {isNewCategory && (
+            <button
+              type="button"
+              onClick={handleSaveCategory}
+              disabled={isSaving}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 p-1 rounded-full bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+              title="Simpan Kategori Baru"
+            >
+              {isSaving ? (
+                <Loader2 className="size-3 animate-spin" />
+              ) : (
+                <Save className="size-3" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Dropdown Menu */}
+        {isDropdownOpen && filteredCategories.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 max-h-32 overflow-y-auto bg-popover text-popover-foreground border rounded-md shadow-md animate-in fade-in-0 zoom-in-95">
+            {filteredCategories.map((cat) => (
+              <button
+                key={`${itemId}-${cat}`}
+                type="button"
+                onClick={() => {
+                  onCategoryChange(cat);
+                  setIsDropdownOpen(false);
+                }}
+                className="w-full flex items-center px-3 py-1.5 text-xs hover:bg-accent hover:text-accent-foreground text-left"
+              >
+                {cat}
+                {category === cat && (
+                  <Check className="ml-auto size-3 opacity-50" />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Backdrop to close dropdown */}
+        {isDropdownOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-transparent"
+            onClick={() => setIsDropdownOpen(false)}
+          />
+        )}
+      </div>
+
+      {/* AI Recommendations for item */}
+      {aiSuggestions.length > 0 && itemName.length > 2 && (
+        <div className="mt-1">
+          <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
+            <Sparkles className="size-2.5 text-amber-500" />
+            AI:
+          </p>
+          <div className="flex flex-wrap gap-1">
+            {aiSuggestions.slice(0, 3).map((suggestion) => (
+              <Badge
+                key={`${itemId}-ai-${suggestion}`}
+                variant="secondary"
+                className="cursor-pointer hover:bg-primary/10 transition-colors text-xs py-0 px-1.5"
+                onClick={() => {
+                  onCategoryChange(suggestion);
+                  setIsDropdownOpen(false);
+                }}
+              >
+                {suggestion}
+              </Badge>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ExpenseItemsEditor({
   items,
   onItemsChange,
   disabled,
+  categoryOptions,
+  onSaveCategory,
 }: ExpenseItemsEditorProps) {
   // Generate unique ID for new items
   const generateId = () =>
@@ -654,16 +841,17 @@ function ExpenseItemsEditor({
                 </div>
               </div>
 
-              {/* Category (optional) */}
-              <input
-                type="text"
-                placeholder="Kategori item (opsional)"
-                value={item.category}
-                onChange={(e) =>
-                  handleItemChange(item.id, "category", e.target.value)
+              {/* Item Category with AI suggestions */}
+              <ItemCategoryInput
+                itemId={item.id}
+                itemName={item.name}
+                category={item.category}
+                onCategoryChange={(cat) =>
+                  handleItemChange(item.id, "category", cat)
                 }
                 disabled={disabled}
-                className="w-full px-3 py-1.5 text-xs rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-50"
+                categoryOptions={categoryOptions}
+                onSaveCategory={onSaveCategory}
               />
 
               {/* Item subtotal */}
@@ -918,6 +1106,34 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       setServerMessage({ type: "error", text: "Gagal menyimpan kategori" });
     } finally {
       setIsSavingCategory(false);
+    }
+  };
+
+  // Handler to save new category for expense items
+  const handleSaveItemCategory = async (categoryName: string) => {
+    if (!categoryName.trim()) return;
+
+    try {
+      await saveNewCategory(
+        categoryName,
+        "EXPENSE", // Items are always expense type
+        []
+      );
+
+      // Refresh categories list
+      const cats = await getUserCategories("EXPENSE");
+      setDbCategories(cats);
+
+      setServerMessage({
+        type: "success",
+        text: `Kategori "${categoryName}" berhasil disimpan!`,
+      });
+      setTimeout(() => setServerMessage(null), 3000);
+    } catch {
+      setServerMessage({
+        type: "error",
+        text: "Gagal menyimpan kategori item",
+      });
     }
   };
 
@@ -1207,6 +1423,8 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                   }));
                 }}
                 disabled={isSubmitting}
+                categoryOptions={categoryOptions}
+                onSaveCategory={handleSaveItemCategory}
               />
             )}
 

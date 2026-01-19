@@ -55,3 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **AI Category Suggestion:** Implemented AI category suggestion for transactions.
 - **Debt:** Implemented debt management features.
+
+## [0.5.0] - 2026-01-19
+
+### Added
+
+- **AI Item Category Suggestion:** Implemented AI category suggestion for transaction items.
