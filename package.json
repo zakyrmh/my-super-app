@@ -10,6 +10,7 @@
     "prepare": "husky"
   },
   "dependencies": {
+    "@google/genai": "^1.37.0",
     "@prisma/adapter-pg": "^7.2.0",
     "@prisma/client": "^7.2.0",
     "@radix-ui/react-avatar": "^1.1.11",
