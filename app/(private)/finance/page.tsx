@@ -160,7 +160,7 @@ export default async function FinancePage() {
       prisma.transaction.groupBy({
         by: ["type"],
         where: {
-          fromAccount: { userId },
+          userId, // Use userId directly, not fromAccount.userId
           date: {
             gte: startOfMonth,
             lte: endOfMonth,
@@ -177,7 +177,7 @@ export default async function FinancePage() {
       // d. Transactions for chart (last 7 days)
       prisma.transaction.findMany({
         where: {
-          fromAccount: { userId },
+          userId, // Use userId directly, not fromAccount.userId
           date: {
             gte: startOfDay(sevenDaysAgo),
             lte: endOfDay(today),
