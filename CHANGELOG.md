@@ -69,3 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Monthly Income:** Fixed monthly income calculation.
+
+## [0.6.0] - 2026-01-21
+
+### Added
+
+- **Account Detail:** Implemented account detail sheet.
+
+### Fixed
+
+- **Tag Transfer:** Fixed tag transfer functionality.

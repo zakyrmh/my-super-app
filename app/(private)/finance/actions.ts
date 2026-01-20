@@ -573,3 +573,169 @@ export async function createTransaction(
     };
   }
 }
+
+// ========================
+// GET ACCOUNT DETAIL ACTION
+// ========================
+
+/** Detailed account information */
+export interface AccountDetail {
+  id: string;
+  name: string;
+  type: AccountType;
+  balance: number;
+  creditLimit?: number | null;
+  statementDate?: number | null;
+  dueDate?: number | null;
+  createdAt?: Date;
+  // Statistics
+  totalIncome: number;
+  totalExpense: number;
+  transactionCount: number;
+}
+
+/** Transaction summary for account detail */
+export interface AccountTransaction {
+  id: string;
+  date: Date;
+  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  amount: number;
+  description: string | null;
+  category: string | null;
+  flowTag: string | null;
+  fromAccountId: string | null;
+  fromAccountName: string | null;
+  toAccountId: string | null;
+  toAccountName: string | null;
+}
+
+/**
+ * Fetches detailed account information including stats.
+ */
+export async function getAccountDetail(
+  accountId: string,
+): Promise<AccountDetail | null> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return null;
+    }
+
+    // Get account with basic info
+    const account = await prisma.account.findFirst({
+      where: { id: accountId, userId: user.id },
+    });
+
+    if (!account) {
+      return null;
+    }
+
+    // Get transaction statistics for this account
+    const [incomeStats, expenseStats, transactionCount] = await Promise.all([
+      // Total income to this account
+      prisma.transaction.aggregate({
+        where: {
+          toAccountId: accountId,
+          type: "INCOME",
+        },
+        _sum: { amount: true },
+      }),
+      // Total expense from this account
+      prisma.transaction.aggregate({
+        where: {
+          fromAccountId: accountId,
+          type: "EXPENSE",
+        },
+        _sum: { amount: true },
+      }),
+      // Total transaction count involving this account
+      prisma.transaction.count({
+        where: {
+          OR: [{ fromAccountId: accountId }, { toAccountId: accountId }],
+        },
+      }),
+    ]);
+
+    return {
+      id: account.id,
+      name: account.name,
+      type: account.type as AccountType,
+      balance: Number(account.balance),
+      creditLimit: account.creditLimit ? Number(account.creditLimit) : null,
+      statementDate: account.statementDate,
+      dueDate: account.dueDate,
+      totalIncome: Number(incomeStats._sum.amount ?? 0),
+      totalExpense: Number(expenseStats._sum.amount ?? 0),
+      transactionCount,
+    };
+  } catch (error) {
+    console.error("Error fetching account detail:", error);
+    return null;
+  }
+}
+
+/**
+ * Fetches transactions for a specific account.
+ * @param accountId - The account ID to get transactions for
+ * @param limit - Maximum number of transactions to return. Use 0 for no limit (all transactions).
+ */
+export async function getAccountTransactions(
+  accountId: string,
+  limit: number = 20,
+): Promise<AccountTransaction[]> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return [];
+    }
+
+    // Verify account belongs to user
+    const account = await prisma.account.findFirst({
+      where: { id: accountId, userId: user.id },
+    });
+
+    if (!account) {
+      return [];
+    }
+
+    // Get transactions involving this account
+    // If limit is 0, don't apply any limit (get all)
+    const transactions = await prisma.transaction.findMany({
+      where: {
+        OR: [{ fromAccountId: accountId }, { toAccountId: accountId }],
+      },
+      include: {
+        category: { select: { name: true } },
+        fromAccount: { select: { id: true, name: true } },
+        toAccount: { select: { id: true, name: true } },
+      },
+      orderBy: { date: "desc" },
+      ...(limit > 0 ? { take: limit } : {}),
+    });
+
+    return transactions.map((tx) => ({
+      id: tx.id,
+      date: tx.date,
+      type: tx.type as "INCOME" | "EXPENSE" | "TRANSFER",
+      amount: Number(tx.amount),
+      description: tx.description,
+      category: tx.category?.name ?? null,
+      flowTag: tx.flowTag,
+      fromAccountId: tx.fromAccountId,
+      fromAccountName: tx.fromAccount?.name ?? null,
+      toAccountId: tx.toAccountId,
+      toAccountName: tx.toAccount?.name ?? null,
+    }));
+  } catch (error) {
+    console.error("Error fetching account transactions:", error);
+    return [];
+  }
+}

@@ -29,8 +29,8 @@ import { format, subDays, startOfDay, endOfDay } from "date-fns";
 import { id as localeId } from "date-fns/locale";
 import {
   CashflowChart,
-  AccountCard,
   AccountFormSheet,
+  AccountListClient,
   TransactionFormSheet,
   DebtFormSheet,
   DebtList,
@@ -121,7 +121,7 @@ export default async function FinancePage() {
     23,
     59,
     59,
-    999
+    999,
   );
 
   // For chart: last 7 days
@@ -216,15 +216,15 @@ export default async function FinancePage() {
   // a. Calculate Net Worth (sum of all account balances)
   const totalNetWorth = accounts.reduce(
     (sum, acc) => sum + Number(acc.balance),
-    0
+    0,
   );
 
   // b. Extract monthly income and expense
   const monthlyIncome = Number(
-    monthlyStats.find((s) => s.type === "INCOME")?._sum.amount ?? 0
+    monthlyStats.find((s) => s.type === "INCOME")?._sum.amount ?? 0,
   );
   const monthlyExpense = Number(
-    monthlyStats.find((s) => s.type === "EXPENSE")?._sum.amount ?? 0
+    monthlyStats.find((s) => s.type === "EXPENSE")?._sum.amount ?? 0,
   );
 
   // d. Process debt data
@@ -275,7 +275,7 @@ export default async function FinancePage() {
       date,
       income: values.income,
       expense: values.expense,
-    })
+    }),
   );
 
   // d. Format transactions for display
@@ -289,7 +289,7 @@ export default async function FinancePage() {
       category: tx.category?.name || null,
       fromAccount: tx.fromAccount,
       toAccount: tx.toAccount,
-    })
+    }),
   );
 
   return (
@@ -453,16 +453,14 @@ export default async function FinancePage() {
         </div>
 
         {accounts.length > 0 ? (
-          <div className="flex gap-3 overflow-x-auto pb-2 -mx-4 px-4 md:mx-0 md:px-0 scrollbar-thin">
-            {accounts.map((account) => (
-              <AccountCard
-                key={account.id}
-                name={account.name}
-                type={account.type}
-                balance={Number(account.balance)}
-              />
-            ))}
-          </div>
+          <AccountListClient
+            accounts={accounts.map((account) => ({
+              id: account.id,
+              name: account.name,
+              type: account.type,
+              balance: Number(account.balance),
+            }))}
+          />
         ) : (
           <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
             <CardContent className="flex flex-col items-center justify-center py-8 text-center gap-3">

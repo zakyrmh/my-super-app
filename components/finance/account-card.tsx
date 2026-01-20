@@ -11,9 +11,11 @@ import {
 } from "lucide-react";
 
 interface AccountCardProps {
+  id: string;
   name: string;
   type: string;
   balance: number;
+  onClick?: (id: string) => void;
 }
 
 /** Get icon and styling based on account type */
@@ -98,13 +100,27 @@ function getTypeLabel(type: string): string {
   }
 }
 
-export function AccountCard({ name, type, balance }: AccountCardProps) {
+export function AccountCard({
+  id,
+  name,
+  type,
+  balance,
+  onClick,
+}: AccountCardProps) {
   const style = getAccountStyle(type);
   const Icon = style.icon;
   const isNegative = balance < 0;
+  const isClickable = !!onClick;
 
   return (
-    <Card className="border-border/50 bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-colors min-w-[200px] shrink-0">
+    <Card
+      className={`border-border/50 bg-card/50 backdrop-blur-sm min-w-[200px] shrink-0 transition-all duration-200 ${
+        isClickable
+          ? "cursor-pointer hover:bg-card/80 hover:shadow-md hover:scale-[1.02] active:scale-[0.98]"
+          : ""
+      }`}
+      onClick={() => onClick?.(id)}
+    >
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-3">
           <div
