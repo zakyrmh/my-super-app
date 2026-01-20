@@ -54,7 +54,7 @@ export interface AllocationResult {
  * @returns Array of TagBalance objects, sorted by balance (highest first)
  */
 export async function calculateTagBalances(
-  accountId: string
+  accountId: string,
 ): Promise<TagBalance[]> {
   // 1. Get all INCOME transactions for this account with flowTag
   const incomeTransactions = await prisma.transaction.findMany({
@@ -69,7 +69,23 @@ export async function calculateTagBalances(
     },
   });
 
-  // 2. Get all EXPENSE TransactionFundings for this account
+  // 2. Get all incoming TRANSFER fundings for this account
+  // These represent tags that were transferred from another account
+  // We use TransactionFunding records instead of flowTag to accurately track multiple tags
+  const incomingTransferFundings = await prisma.transactionFunding.findMany({
+    where: {
+      transaction: {
+        type: "TRANSFER",
+        toAccountId: accountId,
+      },
+    },
+    select: {
+      sourceTag: true,
+      amount: true,
+    },
+  });
+
+  // 3. Get all EXPENSE TransactionFundings for this account
   const expenseFundings = await prisma.transactionFunding.findMany({
     where: {
       transaction: {
@@ -83,8 +99,25 @@ export async function calculateTagBalances(
     },
   });
 
-  // 3. Build credit map (tag -> total income)
+  // 4. Get all outgoing TRANSFER TransactionFundings for this account
+  // These represent tags that were sent to another account
+  const transferFundings = await prisma.transactionFunding.findMany({
+    where: {
+      transaction: {
+        type: "TRANSFER",
+        fromAccountId: accountId,
+      },
+    },
+    select: {
+      sourceTag: true,
+      amount: true,
+    },
+  });
+
+  // 5. Build credit map (tag -> total income + incoming transfers)
   const creditMap = new Map<string, number>();
+
+  // Add credits from INCOME transactions
   for (const tx of incomeTransactions) {
     if (tx.flowTag) {
       const currentCredit = creditMap.get(tx.flowTag) || 0;
@@ -92,14 +125,28 @@ export async function calculateTagBalances(
     }
   }
 
-  // 4. Build debit map (tag -> total spent)
+  // Add credits from incoming TRANSFER fundings (all tags transferred to this account)
+  for (const funding of incomingTransferFundings) {
+    const currentCredit = creditMap.get(funding.sourceTag) || 0;
+    creditMap.set(funding.sourceTag, currentCredit + Number(funding.amount));
+  }
+
+  // 6. Build debit map (tag -> total spent via expenses + outgoing transfers)
   const debitMap = new Map<string, number>();
+
+  // Add debits from EXPENSE fundings
   for (const funding of expenseFundings) {
     const currentDebit = debitMap.get(funding.sourceTag) || 0;
     debitMap.set(funding.sourceTag, currentDebit + Number(funding.amount));
   }
 
-  // 5. Calculate balances for all tags
+  // Add debits from outgoing TRANSFER fundings
+  for (const funding of transferFundings) {
+    const currentDebit = debitMap.get(funding.sourceTag) || 0;
+    debitMap.set(funding.sourceTag, currentDebit + Number(funding.amount));
+  }
+
+  // 7. Calculate balances for all tags
   const allTags = new Set([...creditMap.keys(), ...debitMap.keys()]);
   const balances: TagBalance[] = [];
 
@@ -114,7 +161,7 @@ export async function calculateTagBalances(
     }
   }
 
-  // 6. Sort by balance descending (highest first for priority spending)
+  // 8. Sort by balance descending (highest first for priority spending)
   balances.sort((a, b) => b.balance - a.balance);
 
   return balances;
@@ -143,7 +190,7 @@ export async function calculateTagBalances(
 export async function allocateFundsForExpense(
   accountId: string,
   totalAmount: number,
-  allowOverdraft = false
+  allowOverdraft = false,
 ): Promise<AllocationResult> {
   // 1. Get available tag balances
   const tagBalances = await calculateTagBalances(accountId);
@@ -155,8 +202,8 @@ export async function allocateFundsForExpense(
   if (!allowOverdraft && totalAvailable < totalAmount) {
     throw new Error(
       `Saldo tidak mencukupi. Dibutuhkan: Rp ${totalAmount.toLocaleString(
-        "id-ID"
-      )}, ` + `Tersedia: Rp ${totalAvailable.toLocaleString("id-ID")}`
+        "id-ID",
+      )}, ` + `Tersedia: Rp ${totalAvailable.toLocaleString("id-ID")}`,
     );
   }
 
@@ -219,7 +266,7 @@ export async function getUntaggedBalance(accountId: string): Promise<number> {
   const tagBalances = await calculateTagBalances(accountId);
   const totalTaggedBalance = tagBalances.reduce(
     (sum, tb) => sum + tb.balance,
-    0
+    0,
   );
 
   // Untagged = Account balance - Tagged balance
@@ -239,7 +286,7 @@ export async function getUntaggedBalance(accountId: string): Promise<number> {
  * @returns Array of create data for TransactionFunding
  */
 export function createFundingRecords(
-  allocations: FundingAllocation[]
+  allocations: FundingAllocation[],
 ): { amount: number; sourceTag: string }[] {
   return allocations.map((alloc) => ({
     amount: alloc.amount,

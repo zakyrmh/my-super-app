@@ -178,7 +178,7 @@ function generateFlowTag(category: string, description: string): string {
       // Capitalize first letter of each word
       return words
         .map(
-          (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+          (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase(),
         )
         .join(" ");
     }
@@ -193,7 +193,7 @@ function generateFlowTag(category: string, description: string): string {
  */
 function calculateWaterfallAllocation(
   tagBalances: TagBalance[],
-  amount: number
+  amount: number,
 ): ManualAllocation[] {
   if (amount <= 0 || tagBalances.length === 0) {
     return [];
@@ -276,7 +276,7 @@ function FundAllocationEditor({
   const handleAutoFill = () => {
     const autoAllocations = calculateWaterfallAllocation(
       tagBalances,
-      targetAmount
+      targetAmount,
     );
     onAllocationsChange(autoAllocations);
   };
@@ -431,8 +431,8 @@ function FundAllocationEditor({
           isOver
             ? "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20"
             : isExact
-            ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20"
-            : "bg-muted/30 border-border/50"
+              ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20"
+              : "bg-muted/30 border-border/50"
         }`}
       >
         <div className="flex justify-between text-xs mb-1">
@@ -451,8 +451,8 @@ function FundAllocationEditor({
               isExact
                 ? "text-emerald-600 dark:text-emerald-400"
                 : isOver
-                ? "text-red-600 dark:text-red-400"
-                : "text-amber-600 dark:text-amber-400"
+                  ? "text-red-600 dark:text-red-400"
+                  : "text-amber-600 dark:text-amber-400"
             }`}
           >
             {formatCurrency(totalAllocated)}
@@ -522,7 +522,7 @@ function ItemCategoryInput({
   const filteredCategories = React.useMemo(() => {
     if (!category) return categoryOptions;
     return categoryOptions.filter((cat) =>
-      cat.toLowerCase().includes(category.toLowerCase())
+      cat.toLowerCase().includes(category.toLowerCase()),
     );
   }, [categoryOptions, category]);
 
@@ -530,7 +530,7 @@ function ItemCategoryInput({
   const isNewCategory =
     category.trim().length > 0 &&
     !categoryOptions.some(
-      (c) => c.toLowerCase() === category.trim().toLowerCase()
+      (c) => c.toLowerCase() === category.trim().toLowerCase(),
     );
 
   // AI Suggestion based on item name (debounced)
@@ -704,10 +704,12 @@ function ExpenseItemsEditor({
   const handleItemChange = (
     id: string,
     field: keyof Omit<ExpenseItem, "id">,
-    value: string | number
+    value: string | number,
   ) => {
     onItemsChange(
-      items.map((item) => (item.id === id ? { ...item, [field]: value } : item))
+      items.map((item) =>
+        item.id === id ? { ...item, [field]: value } : item,
+      ),
     );
   };
 
@@ -786,7 +788,7 @@ function ExpenseItemsEditor({
                       handleItemChange(
                         item.id,
                         "price",
-                        formatPrice(e.target.value)
+                        formatPrice(e.target.value),
                       )
                     }
                     disabled={disabled}
@@ -804,7 +806,7 @@ function ExpenseItemsEditor({
                         handleItemChange(
                           item.id,
                           "qty",
-                          Math.max(1, parseInt(e.target.value) || 1)
+                          Math.max(1, parseInt(e.target.value) || 1),
                         )
                       }
                       disabled={disabled}
@@ -837,7 +839,7 @@ function ExpenseItemsEditor({
                   <span className="font-medium text-foreground">
                     {formatCurrency(
                       (parseInt(item.price.replace(/[^\d]/g, ""), 10) || 0) *
-                        item.qty
+                        item.qty,
                     )}
                   </span>
                 </p>
@@ -925,7 +927,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
         return prev;
       });
     },
-    []
+    [],
   );
 
   // Fetch accounts when sheet opens
@@ -1006,14 +1008,14 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
   const filteredCategories = React.useMemo(() => {
     if (!form.category) return categoryOptions;
     return categoryOptions.filter((cat) =>
-      cat.toLowerCase().includes(form.category.toLowerCase())
+      cat.toLowerCase().includes(form.category.toLowerCase()),
     );
   }, [categoryOptions, form.category]);
 
   const isNewCategory =
     form.category.trim().length > 0 &&
     !categoryOptions.some(
-      (c) => c.toLowerCase() === form.category.trim().toLowerCase()
+      (c) => c.toLowerCase() === form.category.trim().toLowerCase(),
     );
 
   // Load categories from DB
@@ -1038,7 +1040,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       try {
         const suggestions = await suggestCategory(
           description,
-          form.type as TransactionType
+          form.type as TransactionType,
         );
 
         if (suggestions && suggestions.length > 0) {
@@ -1064,7 +1066,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       await saveNewCategory(
         form.category,
         form.type as TransactionType,
-        [] // Keywords not generated explicitly in this flow
+        [], // Keywords not generated explicitly in this flow
       );
 
       // Refresh list
@@ -1091,7 +1093,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       await saveNewCategory(
         categoryName,
         "EXPENSE", // Items are always expense type
-        []
+        [],
       );
 
       // Refresh categories list
@@ -1149,15 +1151,19 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       }
     }
 
-    // Validate allocations for EXPENSE (must match transaction amount)
-    if (isExpense && form.fromAccountId && tagBalances.length > 0) {
+    // Validate allocations for EXPENSE and TRANSFER (must match transaction amount)
+    if (
+      (isExpense || isTransfer) &&
+      form.fromAccountId &&
+      tagBalances.length > 0
+    ) {
       const totalAllocated = form.allocations.reduce(
         (sum, a) => sum + a.amount,
-        0
+        0,
       );
       if (totalAllocated !== amount) {
         newErrors.allocations = `Total alokasi (Rp ${totalAllocated.toLocaleString(
-          "id-ID"
+          "id-ID",
         )}) harus sama dengan jumlah transaksi`;
       }
     }
@@ -1165,7 +1171,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     // Validate items for itemized EXPENSE
     if (isExpense && form.hasItems) {
       const validItems = form.items.filter(
-        (item) => item.name.trim() !== "" && item.price !== ""
+        (item) => item.name.trim() !== "" && item.price !== "",
       );
       if (validItems.length === 0) {
         newErrors.items = "Minimal satu item harus diisi dengan nama dan harga";
@@ -1202,9 +1208,10 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
         toAccountId: form.toAccountId || null,
         isPersonal: form.isPersonal,
         flowTag: autoFlowTag,
-        // Include manual allocations for EXPENSE transactions
+        // Include manual allocations for EXPENSE and TRANSFER transactions
         manualAllocations:
-          form.type === "EXPENSE" && form.allocations.length > 0
+          (form.type === "EXPENSE" || form.type === "TRANSFER") &&
+          form.allocations.length > 0
             ? form.allocations
             : null,
         // Include itemized expense details

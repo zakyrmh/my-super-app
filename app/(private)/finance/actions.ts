@@ -39,7 +39,7 @@ export interface AccountActionResponse {
 // ========================
 
 export async function createAccount(
-  input: CreateAccountInput
+  input: CreateAccountInput,
 ): Promise<AccountActionResponse> {
   try {
     // 1. Get authenticated user
@@ -199,7 +199,7 @@ export async function getUserAccounts(): Promise<AccountOption[]> {
  * Used to show allocation preview in the transaction form.
  */
 export async function getAccountTagBalances(
-  accountId: string
+  accountId: string,
 ): Promise<TagBalance[]> {
   try {
     const supabase = await createClient();
@@ -234,7 +234,7 @@ export async function getAccountTagBalances(
 // ========================
 
 export async function createTransaction(
-  input: CreateTransactionInput
+  input: CreateTransactionInput,
 ): Promise<TransactionActionResponse> {
   try {
     // 1. Get authenticated user
@@ -320,24 +320,29 @@ export async function createTransaction(
       }
     }
 
-    // 5. Handle EXPENSE with Fund Allocation
+    // 5. Handle EXPENSE and TRANSFER with Fund Allocation
+    // For EXPENSE: tags are consumed (balance decreases)
+    // For TRANSFER: tags are moved from source account to destination account
     let fundingAllocations: FundingAllocation[] = [];
 
-    if (input.type === "EXPENSE" && input.fromAccountId) {
+    if (
+      (input.type === "EXPENSE" || input.type === "TRANSFER") &&
+      input.fromAccountId
+    ) {
       // Use manual allocations if provided, otherwise auto-allocate
       if (input.manualAllocations && input.manualAllocations.length > 0) {
         // Validate manual allocations total matches amount
         const manualTotal = input.manualAllocations.reduce(
           (sum, a) => sum + a.amount,
-          0
+          0,
         );
         if (manualTotal !== input.amount) {
           return {
             success: false,
             message: `Total alokasi (Rp ${manualTotal.toLocaleString(
-              "id-ID"
+              "id-ID",
             )}) tidak sama dengan jumlah transaksi (Rp ${input.amount.toLocaleString(
-              "id-ID"
+              "id-ID",
             )})`,
           };
         }
@@ -349,7 +354,7 @@ export async function createTransaction(
           const allocationResult = await allocateFundsForExpense(
             input.fromAccountId,
             input.amount,
-            false // Don't allow overdraft
+            false, // Don't allow overdraft
           );
           fundingAllocations = allocationResult.allocations;
         } catch (error) {
@@ -392,9 +397,29 @@ export async function createTransaction(
     }
 
     // 7. Create transaction and update balances in a transaction
+    // For TRANSFER: determine the flowTag from allocations
+    // If single allocation, use that tag. If multiple, combine them or use primary.
+    let transferFlowTag: string | null = null;
+    if (input.type === "TRANSFER" && fundingAllocations.length > 0) {
+      // For TRANSFER, if only one tag is used, pass it to the destination account
+      // If multiple tags, we need to combine them. For simplicity, use the first/primary tag.
+      // A more complex approach could store multiple tags, but current schema uses single flowTag.
+      if (fundingAllocations.length === 1) {
+        transferFlowTag = fundingAllocations[0].sourceTag;
+      } else {
+        // Multiple tags being transferred - use primary (highest amount) tag
+        // The full breakdown is still tracked via TransactionFunding records
+        const primaryAllocation = fundingAllocations.reduce((max, alloc) =>
+          alloc.amount > max.amount ? alloc : max,
+        );
+        transferFlowTag = primaryAllocation.sourceTag;
+      }
+    }
+
     const result = await prisma.$transaction(async (tx) => {
       // Create the transaction record
-      // Note: For EXPENSE, flowTag is NOT set (funding comes from multiple sources)
+      // Note: For EXPENSE, flowTag is NOT set (funding tracked via TransactionFunding)
+      // For TRANSFER, flowTag IS set to carry the tag to the destination account
       const transaction = await tx.transaction.create({
         data: {
           userId: user.id,
@@ -406,9 +431,13 @@ export async function createTransaction(
           fromAccountId: input.fromAccountId || null,
           toAccountId: input.toAccountId || null,
           isPersonal: input.isPersonal ?? true,
-          // flowTag is only set for INCOME (source tracking)
+          // flowTag is set for INCOME and TRANSFER (source tracking)
           flowTag:
-            input.type === "INCOME" ? input.flowTag?.trim() || null : null,
+            input.type === "INCOME"
+              ? input.flowTag?.trim() || null
+              : input.type === "TRANSFER"
+                ? transferFlowTag
+                : null,
         },
       });
 
@@ -492,6 +521,18 @@ export async function createTransaction(
           where: { id: input.toAccountId },
           data: { balance: { increment: input.amount } },
         });
+
+        // Create TransactionFunding records for TRANSFER
+        // This tracks which tags are being moved from the source account
+        if (fundingAllocations.length > 0) {
+          await tx.transactionFunding.createMany({
+            data: fundingAllocations.map((alloc) => ({
+              transactionId: transaction.id,
+              sourceTag: alloc.sourceTag,
+              amount: alloc.amount,
+            })),
+          });
+        }
       }
 
       return transaction;
