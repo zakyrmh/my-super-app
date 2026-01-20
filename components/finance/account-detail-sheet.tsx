@@ -478,36 +478,89 @@ interface TransactionListProps {
   currentAccountId: string;
 }
 
+interface DayGroup {
+  date: string;
+  dateLabel: string;
+  dayName: string;
+  transactions: AccountTransaction[];
+  totalIn: number;
+  totalOut: number;
+}
+
 function TransactionList({
   transactions,
   currentAccountId,
 }: TransactionListProps) {
-  // Group transactions by month-year
-  const groupedTransactions = React.useMemo(() => {
-    const groups = new Map<string, AccountTransaction[]>();
+  // Group transactions by day with income/expense summary
+  const groupedByDay = React.useMemo(() => {
+    const groups = new Map<string, DayGroup>();
 
     transactions.forEach((tx) => {
-      const monthYear = format(tx.date, "MMMM yyyy", { locale: localeId });
-      const existing = groups.get(monthYear) || [];
-      groups.set(monthYear, [...existing, tx]);
+      const dateKey = format(tx.date, "yyyy-MM-dd");
+      const existing = groups.get(dateKey);
+
+      // Calculate if this transaction is incoming or outgoing for this account
+      const isIncoming =
+        tx.type === "INCOME" ||
+        (tx.type === "TRANSFER" && tx.toAccountId === currentAccountId);
+
+      const amount = tx.amount;
+
+      if (existing) {
+        existing.transactions.push(tx);
+        if (isIncoming) {
+          existing.totalIn += amount;
+        } else {
+          existing.totalOut += amount;
+        }
+      } else {
+        groups.set(dateKey, {
+          date: dateKey,
+          dateLabel: format(tx.date, "dd MMMM yyyy", { locale: localeId }),
+          dayName: format(tx.date, "EEEE", { locale: localeId }),
+          transactions: [tx],
+          totalIn: isIncoming ? amount : 0,
+          totalOut: isIncoming ? 0 : amount,
+        });
+      }
     });
 
-    return Array.from(groups.entries());
-  }, [transactions]);
+    return Array.from(groups.values());
+  }, [transactions, currentAccountId]);
 
   return (
     <div className="space-y-4">
-      {groupedTransactions.map(([monthYear, txs]) => (
-        <div key={monthYear}>
-          {/* Month Header */}
+      {groupedByDay.map((dayGroup) => (
+        <div key={dayGroup.date}>
+          {/* Day Header */}
           <div className="sticky top-0 z-10 bg-card/95 backdrop-blur-sm py-2 mb-2 border-b border-border/30">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-              {monthYear}
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {dayGroup.dayName}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {dayGroup.dateLabel}
+                </p>
+              </div>
+              <div className="flex items-center gap-3 text-xs">
+                {dayGroup.totalIn > 0 && (
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                    +{formatCurrency(dayGroup.totalIn).replace("Rp", "").trim()}
+                  </span>
+                )}
+                {dayGroup.totalOut > 0 && (
+                  <span className="text-red-600 dark:text-red-400 font-medium">
+                    -
+                    {formatCurrency(dayGroup.totalOut).replace("Rp", "").trim()}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
-          {/* Transactions for this month */}
+          {/* Transactions for this day */}
           <div className="space-y-1">
-            {txs.map((tx) => (
+            {dayGroup.transactions.map((tx) => (
               <TransactionItem
                 key={tx.id}
                 transaction={tx}
