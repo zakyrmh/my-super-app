@@ -44,11 +44,15 @@ export interface AllocationResult {
 /**
  * Calculates available balance per Tag for a specific account.
  *
- * Logic:
- * - Credit: Sum of all INCOME amounts with that flowTag going to this account
- * - Debit: Sum of all TransactionFunding amounts with that sourceTag
- *          from EXPENSE transactions of this account
- * - Balance: Credit - Debit
+ * Refactored approach:
+ * 1. Query INCOME and REPAYMENT transactions (direct credits via flowTag)
+ * 2. Query ALL TransactionFunding records with include transaction
+ * 3. Calculate net balance per tag based on transaction type:
+ *    - INCOME/REPAYMENT (via flowTag): +amount (credit)
+ *    - TRANSFER to this account (via TransactionFunding): +amount (credit)
+ *    - EXPENSE from this account (via TransactionFunding): -amount (debit)
+ *    - TRANSFER from this account (via TransactionFunding): -amount (debit)
+ *    - LENDING from this account (via TransactionFunding): -amount (debit)
  *
  * @param accountId - The account ID to calculate balances for
  * @returns Array of TagBalance objects, sorted by balance (highest first)
@@ -56,7 +60,7 @@ export interface AllocationResult {
 export async function calculateTagBalances(
   accountId: string,
 ): Promise<TagBalance[]> {
-  // 1. Get all INCOME transactions for this account with flowTag
+  // 1. Get all INCOME transactions for this account with flowTag (direct credit)
   const incomeTransactions = await prisma.transaction.findMany({
     where: {
       type: "INCOME",
@@ -69,99 +73,144 @@ export async function calculateTagBalances(
     },
   });
 
-  // 2. Get all incoming TRANSFER fundings for this account
-  // These represent tags that were transferred from another account
-  // We use TransactionFunding records instead of flowTag to accurately track multiple tags
-  const incomingTransferFundings = await prisma.transactionFunding.findMany({
+  // 2. Get all REPAYMENT transactions for this account with flowTag (direct credit)
+  // This includes money returned from loans (piutang) - creates new fund source
+  const repaymentTransactions = await prisma.transaction.findMany({
     where: {
-      transaction: {
-        type: "TRANSFER",
-        toAccountId: accountId,
-      },
+      type: "REPAYMENT",
+      toAccountId: accountId,
+      flowTag: { not: null },
     },
     select: {
-      sourceTag: true,
+      flowTag: true,
       amount: true,
     },
   });
 
-  // 3. Get all EXPENSE TransactionFundings for this account
-  const expenseFundings = await prisma.transactionFunding.findMany({
+  // 3. Query ALL TransactionFunding records related to this account with transaction included
+  // This allows us to determine the direction based on transaction type and account relations
+  const allFundings = await prisma.transactionFunding.findMany({
     where: {
-      transaction: {
-        type: "EXPENSE",
-        fromAccountId: accountId,
-      },
+      OR: [
+        // Outgoing: EXPENSE, LENDING, or TRANSFER from this account
+        {
+          transaction: {
+            fromAccountId: accountId,
+            type: { in: ["EXPENSE", "LENDING", "TRANSFER"] },
+          },
+        },
+        // Incoming: TRANSFER to this account
+        {
+          transaction: {
+            toAccountId: accountId,
+            type: "TRANSFER",
+          },
+        },
+      ],
     },
-    select: {
-      sourceTag: true,
-      amount: true,
+    include: {
+      transaction: {
+        select: {
+          type: true,
+          fromAccountId: true,
+          toAccountId: true,
+        },
+      },
     },
   });
 
-  // 4. Get all outgoing TRANSFER TransactionFundings for this account
-  // These represent tags that were sent to another account
-  const transferFundings = await prisma.transactionFunding.findMany({
-    where: {
-      transaction: {
-        type: "TRANSFER",
-        fromAccountId: accountId,
-      },
-    },
-    select: {
-      sourceTag: true,
-      amount: true,
-    },
-  });
+  // 4. Build balance map using reduce - calculate net balance per tag
+  // Map structure: tag -> { credit, debit }
+  const tagDataMap = new Map<string, { credit: number; debit: number }>();
 
-  // 5. Build credit map (tag -> total income + incoming transfers)
-  const creditMap = new Map<string, number>();
+  // Helper function to get or create tag data
+  const getTagData = (tag: string) => {
+    if (!tagDataMap.has(tag)) {
+      tagDataMap.set(tag, { credit: 0, debit: 0 });
+    }
+    return tagDataMap.get(tag)!;
+  };
 
-  // Add credits from INCOME transactions
+  // Add credits from INCOME transactions (flowTag based)
   for (const tx of incomeTransactions) {
     if (tx.flowTag) {
-      const currentCredit = creditMap.get(tx.flowTag) || 0;
-      creditMap.set(tx.flowTag, currentCredit + Number(tx.amount));
+      const tagData = getTagData(tx.flowTag);
+      tagData.credit += Number(tx.amount);
     }
   }
 
-  // Add credits from incoming TRANSFER fundings (all tags transferred to this account)
-  for (const funding of incomingTransferFundings) {
-    const currentCredit = creditMap.get(funding.sourceTag) || 0;
-    creditMap.set(funding.sourceTag, currentCredit + Number(funding.amount));
+  // Add credits from REPAYMENT transactions (flowTag based)
+  for (const tx of repaymentTransactions) {
+    if (tx.flowTag) {
+      const tagData = getTagData(tx.flowTag);
+      tagData.credit += Number(tx.amount);
+    }
   }
 
-  // 6. Build debit map (tag -> total spent via expenses + outgoing transfers)
-  const debitMap = new Map<string, number>();
+  // Process all TransactionFunding records based on transaction type and direction
+  for (const funding of allFundings) {
+    const tagData = getTagData(funding.sourceTag);
+    const amount = Number(funding.amount);
+    const txType = funding.transaction.type;
+    const isFromThisAccount = funding.transaction.fromAccountId === accountId;
+    const isToThisAccount = funding.transaction.toAccountId === accountId;
 
-  // Add debits from EXPENSE fundings
-  for (const funding of expenseFundings) {
-    const currentDebit = debitMap.get(funding.sourceTag) || 0;
-    debitMap.set(funding.sourceTag, currentDebit + Number(funding.amount));
+    switch (txType) {
+      case "INCOME":
+      case "REPAYMENT":
+        // These should not have TransactionFunding, but if they do, treat as credit
+        tagData.credit += amount;
+        break;
+
+      case "EXPENSE":
+        // Expense always deducts from the source account
+        if (isFromThisAccount) {
+          tagData.debit += amount;
+        }
+        break;
+
+      case "LENDING":
+        // Lending money to others - deducts from source account
+        if (isFromThisAccount) {
+          tagData.debit += amount;
+        }
+        break;
+
+      case "TRANSFER":
+        // Transfer: debit from source, credit to destination
+        if (isFromThisAccount) {
+          // Outgoing transfer - deduct from this account
+          tagData.debit += amount;
+        } else if (isToThisAccount) {
+          // Incoming transfer - add to this account
+          tagData.credit += amount;
+        }
+        break;
+
+      default:
+        // Ignore unknown types
+        break;
+    }
   }
 
-  // Add debits from outgoing TRANSFER fundings
-  for (const funding of transferFundings) {
-    const currentDebit = debitMap.get(funding.sourceTag) || 0;
-    debitMap.set(funding.sourceTag, currentDebit + Number(funding.amount));
-  }
-
-  // 7. Calculate balances for all tags
-  const allTags = new Set([...creditMap.keys(), ...debitMap.keys()]);
+  // 5. Convert map to array and calculate final balance
   const balances: TagBalance[] = [];
 
-  for (const tag of allTags) {
-    const credit = creditMap.get(tag) || 0;
-    const debit = debitMap.get(tag) || 0;
-    const balance = credit - debit;
+  for (const [tag, data] of tagDataMap) {
+    const balance = data.credit - data.debit;
 
     // Only include tags with positive balance (can't spend from negative)
     if (balance > 0) {
-      balances.push({ tag, credit, debit, balance });
+      balances.push({
+        tag,
+        credit: data.credit,
+        debit: data.debit,
+        balance,
+      });
     }
   }
 
-  // 8. Sort by balance descending (highest first for priority spending)
+  // 6. Sort by balance descending (highest first for priority spending)
   balances.sort((a, b) => b.balance - a.balance);
 
   return balances;

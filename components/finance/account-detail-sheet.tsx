@@ -25,6 +25,8 @@ import {
   Tag,
   Receipt,
   CalendarDays,
+  HandCoins,
+  Handshake,
 } from "lucide-react";
 import {
   getAccountDetail,
@@ -500,8 +502,11 @@ function TransactionList({
       const existing = groups.get(dateKey);
 
       // Calculate if this transaction is incoming or outgoing for this account
+      // REPAYMENT to this account is incoming (friend repays loan)
+      // LENDING from this account is outgoing (lending money to friend)
       const isIncoming =
         tx.type === "INCOME" ||
+        tx.type === "REPAYMENT" ||
         (tx.type === "TRANSFER" && tx.toAccountId === currentAccountId);
 
       const amount = tx.amount;
@@ -584,11 +589,15 @@ function TransactionItem({
   currentAccountId,
 }: TransactionItemProps) {
   // Determine if this is incoming or outgoing for the current account
+  // REPAYMENT = friend repays loan (incoming money)
+  // LENDING = lending money to friend (outgoing money)
   const isIncoming =
     tx.type === "INCOME" ||
+    tx.type === "REPAYMENT" ||
     (tx.type === "TRANSFER" && tx.toAccountId === currentAccountId);
   const isOutgoing =
     tx.type === "EXPENSE" ||
+    tx.type === "LENDING" ||
     (tx.type === "TRANSFER" && tx.fromAccountId === currentAccountId);
 
   const getIcon = () => {
@@ -599,6 +608,10 @@ function TransactionItem({
         return <ArrowUpRight className="size-4 text-red-500" />;
       case "TRANSFER":
         return <ArrowRightLeft className="size-4 text-blue-500" />;
+      case "LENDING":
+        return <HandCoins className="size-4 text-orange-500" />;
+      case "REPAYMENT":
+        return <Handshake className="size-4 text-emerald-500" />;
       default:
         return null;
     }
@@ -612,8 +625,10 @@ function TransactionItem({
     }
     switch (tx.type) {
       case "INCOME":
+      case "REPAYMENT":
         return "text-emerald-600 dark:text-emerald-400";
       case "EXPENSE":
+      case "LENDING":
         return "text-red-600 dark:text-red-400";
       default:
         return "text-foreground";
@@ -646,8 +661,9 @@ function TransactionItem({
         <p className="text-sm font-medium text-foreground truncate">
           {getDescription()}
         </p>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
           <span>{format(tx.date, "dd MMM", { locale: localeId })}</span>
+          {/* Show flowTag for INCOME/REPAYMENT transactions */}
           {tx.flowTag && (
             <>
               <span>•</span>
@@ -659,6 +675,24 @@ function TransactionItem({
               </Badge>
             </>
           )}
+          {/* Show funding source tags for EXPENSE/LENDING transactions */}
+          {(tx.type === "EXPENSE" || tx.type === "LENDING") &&
+            tx.fundings &&
+            tx.fundings.length > 0 && (
+              <>
+                <span>•</span>
+                <span className="text-xs text-muted-foreground">dari:</span>
+                {tx.fundings.map((funding, idx) => (
+                  <Badge
+                    key={`${tx.id}-funding-${idx}`}
+                    variant="outline"
+                    className="text-xs py-0 px-1.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20"
+                  >
+                    {funding.sourceTag}
+                  </Badge>
+                ))}
+              </>
+            )}
         </div>
       </div>
       <p className={`text-sm font-semibold ${getAmountStyle()}`}>

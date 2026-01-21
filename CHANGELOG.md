@@ -74,9 +74,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Account Detail:** Implemented account detail sheet.
+- **Account Detail:** Implemented account detail sheet with transaction history and fund sources.
+- **Transaction Fundings Display:** Show funding source tags (sourceTag) on expense/lending transactions in account detail.
+- **Debug API:** Added `/api/debug-tags` endpoint for diagnosing tag balance issues.
+
+### Changed
+
+- **Smart Allocation Refactor:** Refactored `calculateTagBalances()` in `lib/finance/smart-allocation.ts`:
+  - Now uses single query for TransactionFunding with `include { transaction }`.
+  - Manual calculation with switch-case based on transaction type.
+  - Correctly handles INCOME, REPAYMENT, EXPENSE, LENDING, and TRANSFER transactions.
+- **FlowTag Format Consistency:** Updated REPAYMENT flowTag format from `"Pengembalian: {name}"` to `"Pengembalian dari {name}"` for consistency with existing data.
+- **Transaction Types:** Extended `AccountTransaction` interface to include `LENDING` and `REPAYMENT` types.
 
 ### Fixed
 
+- **Tag Balance Bug:** Fixed critical bug where REPAYMENT transactions weren't included as credit sources in tag balance calculations.
+- **Lending Debit Bug:** Fixed bug where LENDING transaction fundings weren't deducted from tag balances.
+- **Transaction Display:** Fixed transaction item display in account detail to show correct icons and colors for LENDING (orange) and REPAYMENT (green) types.
 - **Tag Transfer:** Fixed tag transfer functionality.
-- **Debt:** Fixed debt allocation functionality.
+- **Debt Allocation:** Fixed debt allocation functionality to properly track fund sources.
+
+### Database Migration Required
+
+After updating, run the following SQL to fix existing REPAYMENT transactions:
+
+```sql
+UPDATE "Transaction"
+SET "flowTag" = REPLACE("flowTag", 'Pengembalian: ', 'Pengembalian dari ')
+WHERE type = 'REPAYMENT'
+  AND "flowTag" LIKE 'Pengembalian: %';
+```
