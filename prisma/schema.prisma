@@ -72,7 +72,7 @@ model Account {
 model Transaction {
   id          String          @id @default(uuid())
   date        DateTime        @default(now())
-  type        TransactionType // INCOME, EXPENSE, TRANSFER
+  type        TransactionType
   amount      Decimal
   description String?
 
@@ -115,6 +115,8 @@ enum TransactionType {
   INCOME
   EXPENSE
   TRANSFER
+  LENDING
+  REPAYMENT
 }
 
 model TransactionItem {

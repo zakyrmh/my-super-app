@@ -3,6 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { createClient } from "@/utils/supabase/server";
 import { prisma } from "@/lib/prisma";
+import {
+  calculateTagBalances,
+  type TagBalance,
+} from "@/lib/finance/smart-allocation";
 
 // ========================
 // TYPE DEFINITIONS
@@ -30,6 +34,12 @@ export interface CreateContactInput {
   name: string;
 }
 
+/** Fund allocation for selecting source tags on LENDING */
+export interface DebtFundAllocation {
+  sourceTag: string;
+  amount: number;
+}
+
 /** Input data for creating a new debt */
 export interface CreateDebtInput {
   type: DebtType;
@@ -39,6 +49,8 @@ export interface CreateDebtInput {
   contactName?: string | null; // For creating new contact on-the-fly
   description?: string | null;
   dueDate?: string | null; // ISO date string
+  /** Manual fund allocations for LENDING (optional - tracks which tag money comes from) */
+  allocations?: DebtFundAllocation[] | null;
 }
 
 /** Input data for recording a payment */
@@ -119,6 +131,45 @@ export async function getUserAccountsForDebt(): Promise<AccountOption[]> {
 }
 
 // ========================
+// GET ACCOUNT TAG BALANCES FOR DEBT
+// ========================
+
+/**
+ * Fetches available fund source tags (with balances) for a specific account.
+ * Used to show allocation preview in the debt form for LENDING.
+ */
+export async function getAccountTagBalancesForDebt(
+  accountId: string,
+): Promise<TagBalance[]> {
+  try {
+    const supabase = await createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) {
+      return [];
+    }
+
+    // Verify account belongs to user
+    const account = await prisma.account.findFirst({
+      where: { id: accountId, userId: user.id },
+    });
+
+    if (!account) {
+      return [];
+    }
+
+    // Get tag balances using the smart allocation logic
+    const tagBalances = await calculateTagBalances(accountId);
+    return tagBalances;
+  } catch (error) {
+    console.error("Error fetching tag balances for debt:", error);
+    return [];
+  }
+}
+
+// ========================
 // GET USER CONTACTS ACTION
 // ========================
 
@@ -154,7 +205,7 @@ export async function getUserContacts(): Promise<ContactOption[]> {
 // ========================
 
 export async function createContact(
-  input: CreateContactInput
+  input: CreateContactInput,
 ): Promise<{ success: boolean; message: string; contactId?: string }> {
   try {
     const supabase = await createClient();
@@ -294,11 +345,11 @@ export async function getDebtSummary(): Promise<DebtSummary> {
 
     const totalLending = lendingDebts.reduce(
       (sum, d) => sum + Number(d.remaining),
-      0
+      0,
     );
     const totalBorrowing = borrowingDebts.reduce(
       (sum, d) => sum + Number(d.remaining),
-      0
+      0,
     );
 
     return {
@@ -335,7 +386,7 @@ export async function getDebtSummary(): Promise<DebtSummary> {
  * - Tidak tercatat sebagai transaksi pemasukan
  */
 export async function createDebt(
-  input: CreateDebtInput
+  input: CreateDebtInput,
 ): Promise<DebtActionResponse> {
   try {
     const supabase = await createClient();
@@ -391,7 +442,7 @@ export async function createDebt(
         return {
           success: false,
           message: `Saldo akun tidak mencukupi. Saldo saat ini: Rp ${currentBalance.toLocaleString(
-            "id-ID"
+            "id-ID",
           )}`,
         };
       }
@@ -465,6 +516,32 @@ export async function createDebt(
           where: { id: input.accountId },
           data: { balance: { decrement: input.amount } },
         });
+
+        // Create a LENDING transaction to track the debt
+        // This is separate from regular EXPENSE transactions
+        const lendingTx = await tx.transaction.create({
+          data: {
+            userId: user.id,
+            type: "LENDING", // Specific type for lending money to others
+            amount: input.amount,
+            date: new Date(),
+            description: `Piutang ke ${contactName}`,
+            fromAccountId: input.accountId,
+            isPersonal: true,
+            flowTag: `Piutang: ${contactName}`, // Tag for tracking
+          },
+        });
+
+        // Create TransactionFunding records if allocations are provided
+        if (input.allocations && input.allocations.length > 0) {
+          await tx.transactionFunding.createMany({
+            data: input.allocations.map((alloc) => ({
+              transactionId: lendingTx.id,
+              sourceTag: alloc.sourceTag,
+              amount: alloc.amount,
+            })),
+          });
+        }
       } else {
         // HUTANG: Uang masuk ke akun (dipinjam dari teman)
         await tx.account.update({
@@ -472,12 +549,12 @@ export async function createDebt(
           data: { balance: { increment: input.amount } },
         });
 
-        // Create a "virtual" INCOME transaction with flowTag for fund tracking
-        // This helps with the smart allocation system
+        // Create a REPAYMENT transaction to track borrowed money
+        // This is separate from regular INCOME transactions
         await tx.transaction.create({
           data: {
             userId: user.id,
-            type: "INCOME",
+            type: "REPAYMENT", // Specific type for receiving borrowed money
             amount: input.amount,
             date: new Date(),
             description: `Pinjaman dari ${contactName}`,
@@ -530,7 +607,7 @@ export async function createDebt(
  * - Tidak tercatat sebagai transaksi pengeluaran
  */
 export async function recordPayment(
-  input: RecordPaymentInput
+  input: RecordPaymentInput,
 ): Promise<DebtActionResponse> {
   try {
     const supabase = await createClient();
@@ -604,7 +681,7 @@ export async function recordPayment(
       return {
         success: false,
         message: `Jumlah pembayaran melebihi sisa pinjaman (Rp ${currentRemaining.toLocaleString(
-          "id-ID"
+          "id-ID",
         )}).`,
       };
     }
@@ -616,7 +693,7 @@ export async function recordPayment(
         return {
           success: false,
           message: `Saldo akun tidak mencukupi. Saldo saat ini: Rp ${currentBalance.toLocaleString(
-            "id-ID"
+            "id-ID",
           )}`,
         };
       }
@@ -645,11 +722,11 @@ export async function recordPayment(
           data: { balance: { increment: input.amount } },
         });
 
-        // Create a "virtual" INCOME transaction with flowTag for fund tracking
+        // Create a REPAYMENT transaction (friend repays the loan)
         await tx.transaction.create({
           data: {
             userId: user.id,
-            type: "INCOME",
+            type: "REPAYMENT", // Friend is repaying the loan
             amount: input.amount,
             date: new Date(),
             description: `Pengembalian dari ${debt.contact.name}`,
@@ -663,6 +740,20 @@ export async function recordPayment(
         await tx.account.update({
           where: { id: input.accountId },
           data: { balance: { decrement: input.amount } },
+        });
+
+        // Create a LENDING transaction (user repays borrowed money)
+        await tx.transaction.create({
+          data: {
+            userId: user.id,
+            type: "LENDING", // User is paying back the borrowed money
+            amount: input.amount,
+            date: new Date(),
+            description: `Pembayaran hutang ke ${debt.contact.name}`,
+            fromAccountId: input.accountId,
+            isPersonal: true,
+            flowTag: `Bayar Hutang: ${debt.contact.name}`,
+          },
         });
       }
     });
@@ -685,9 +776,9 @@ export async function recordPayment(
       return {
         success: true,
         message: `Pembayaran Rp ${input.amount.toLocaleString(
-          "id-ID"
+          "id-ID",
         )} berhasil. ${actionLabel}. Sisa ${typeLabel}: Rp ${newRemaining.toLocaleString(
-          "id-ID"
+          "id-ID",
         )}.`,
         debtId: debt.id,
       };
@@ -761,7 +852,7 @@ export async function deleteDebt(debtId: string): Promise<DebtActionResponse> {
  */
 export async function markDebtAsPaid(
   debtId: string,
-  accountId?: string
+  accountId?: string,
 ): Promise<DebtActionResponse> {
   try {
     const supabase = await createClient();
@@ -811,7 +902,7 @@ export async function markDebtAsPaid(
           return {
             success: false,
             message: `Saldo akun tidak mencukupi untuk melunasi. Saldo: Rp ${currentBalance.toLocaleString(
-              "id-ID"
+              "id-ID",
             )}, Sisa hutang: Rp ${remainingAmount.toLocaleString("id-ID")}`,
           };
         }
@@ -833,10 +924,11 @@ export async function markDebtAsPaid(
             data: { balance: { increment: remainingAmount } },
           });
 
+          // Create REPAYMENT transaction (friend fully repays the loan)
           await tx.transaction.create({
             data: {
               userId: user.id,
-              type: "INCOME",
+              type: "REPAYMENT", // Friend is repaying the loan
               amount: remainingAmount,
               date: new Date(),
               description: `Pelunasan dari ${debt.contact.name}`,
@@ -850,6 +942,20 @@ export async function markDebtAsPaid(
           await tx.account.update({
             where: { id: accountId },
             data: { balance: { decrement: remainingAmount } },
+          });
+
+          // Create LENDING transaction (user fully repays borrowed money)
+          await tx.transaction.create({
+            data: {
+              userId: user.id,
+              type: "LENDING", // User is paying back the borrowed money
+              amount: remainingAmount,
+              date: new Date(),
+              description: `Pelunasan hutang ke ${debt.contact.name}`,
+              fromAccountId: accountId,
+              isPersonal: true,
+              flowTag: `Bayar Hutang: ${debt.contact.name}`,
+            },
           });
         }
       });

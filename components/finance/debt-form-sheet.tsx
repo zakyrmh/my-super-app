@@ -40,10 +40,13 @@ import {
   createDebt,
   getUserContacts,
   getUserAccountsForDebt,
+  getAccountTagBalancesForDebt,
   type DebtType,
   type ContactOption,
   type AccountOption,
+  type DebtFundAllocation,
 } from "@/app/(private)/finance/debt-actions";
+import { type TagBalance } from "@/lib/finance/smart-allocation";
 
 // ========================
 // TYPE DEFINITIONS
@@ -63,6 +66,8 @@ interface FormState {
   description: string;
   dueDate: string;
   isNewContact: boolean;
+  /** Fund allocations for LENDING (tracks which tag money comes from) */
+  allocations: DebtFundAllocation[];
 }
 
 interface FormErrors {
@@ -71,6 +76,7 @@ interface FormErrors {
   account?: string;
   contact?: string;
   dueDate?: string;
+  allocations?: string;
 }
 
 // ========================
@@ -159,6 +165,8 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
   const [isLoadingData, setIsLoadingData] = React.useState(false);
   const [contacts, setContacts] = React.useState<ContactOption[]>([]);
   const [accounts, setAccounts] = React.useState<AccountOption[]>([]);
+  const [tagBalances, setTagBalances] = React.useState<TagBalance[]>([]);
+  const [isLoadingTags, setIsLoadingTags] = React.useState(false);
   const [contactSearch, setContactSearch] = React.useState("");
   const [showContactDropdown, setShowContactDropdown] = React.useState(false);
   const [serverMessage, setServerMessage] = React.useState<{
@@ -176,6 +184,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
     description: "",
     dueDate: "",
     isNewContact: false,
+    allocations: [],
   });
 
   const [errors, setErrors] = React.useState<FormErrors>({});
@@ -205,13 +214,39 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
         description: "",
         dueDate: "",
         isNewContact: false,
+        allocations: [],
       });
       setErrors({});
       setServerMessage(null);
       setContactSearch("");
       setShowContactDropdown(false);
+      setTagBalances([]);
     }
   }, [open]);
+
+  // Fetch tag balances when account changes and type is LENDING
+  const isLending = form.type === "LENDING";
+  React.useEffect(() => {
+    if (form.accountId && isLending) {
+      setIsLoadingTags(true);
+      getAccountTagBalancesForDebt(form.accountId)
+        .then((data) => {
+          setTagBalances(data);
+        })
+        .catch(() => {
+          setTagBalances([]);
+        })
+        .finally(() => {
+          setIsLoadingTags(false);
+        });
+    } else {
+      setTagBalances([]);
+      // Reset allocations when not LENDING
+      if (!isLending) {
+        setForm((prev) => ({ ...prev, allocations: [] }));
+      }
+    }
+  }, [form.accountId, isLending]);
 
   // Get current debt type config
   const currentTypeConfig = DEBT_TYPES.find((t) => t.value === form.type);
@@ -223,7 +258,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
   const filteredContacts = React.useMemo(() => {
     if (!contactSearch) return contacts;
     return contacts.filter((c) =>
-      c.name.toLowerCase().includes(contactSearch.toLowerCase())
+      c.name.toLowerCase().includes(contactSearch.toLowerCase()),
     );
   }, [contacts, contactSearch]);
 
@@ -231,7 +266,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
   const isNewContactName = React.useMemo(() => {
     if (!contactSearch) return false;
     return !contacts.some(
-      (c) => c.name.toLowerCase() === contactSearch.toLowerCase()
+      (c) => c.name.toLowerCase() === contactSearch.toLowerCase(),
     );
   }, [contacts, contactSearch]);
 
@@ -243,7 +278,8 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
       newErrors.type = "Tipe pinjaman wajib dipilih";
     }
 
-    if (!form.amount || parseCurrencyInput(form.amount) <= 0) {
+    const amount = parseCurrencyInput(form.amount);
+    if (!form.amount || amount <= 0) {
       newErrors.amount = "Jumlah pinjaman wajib diisi";
     }
 
@@ -254,11 +290,23 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
     // Check balance for LENDING
     if (form.type === "LENDING" && form.accountId) {
       const account = accounts.find((a) => a.id === form.accountId);
-      const amount = parseCurrencyInput(form.amount);
       if (account && amount > account.balance) {
         newErrors.amount = `Saldo tidak cukup. Tersedia: ${formatCurrency(
-          account.balance
+          account.balance,
         )}`;
+      }
+
+      // Validate allocations for LENDING if tag balances exist
+      if (tagBalances.length > 0) {
+        const totalAllocated = form.allocations.reduce(
+          (sum, a) => sum + a.amount,
+          0,
+        );
+        if (totalAllocated !== amount) {
+          newErrors.allocations = `Total alokasi (Rp ${totalAllocated.toLocaleString(
+            "id-ID",
+          )}) harus sama dengan jumlah pinjaman`;
+        }
       }
     }
 
@@ -288,6 +336,11 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
         contactName: form.isNewContact ? form.contactName : null,
         description: form.description || null,
         dueDate: form.dueDate || null,
+        // Include allocations for LENDING if tag balances exist
+        allocations:
+          isLending && tagBalances.length > 0 && form.allocations.length > 0
+            ? form.allocations
+            : null,
       });
 
       if (result.success) {
@@ -521,21 +574,287 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
                 >
                   {form.type === "LENDING"
                     ? `Saldo akan berkurang: ${formatCurrency(
-                        selectedAccount.balance
+                        selectedAccount.balance,
                       )} → ${formatCurrency(
                         selectedAccount.balance -
-                          parseCurrencyInput(form.amount)
+                          parseCurrencyInput(form.amount),
                       )}`
                     : `Saldo akan bertambah: ${formatCurrency(
-                        selectedAccount.balance
+                        selectedAccount.balance,
                       )} → ${formatCurrency(
                         selectedAccount.balance +
-                          parseCurrencyInput(form.amount)
+                          parseCurrencyInput(form.amount),
                       )}`}
                 </p>
               )}
               {errors.account && (
                 <p className="text-xs text-red-500">{errors.account}</p>
+              )}
+
+              {/* Fund Allocation Editor for LENDING */}
+              {isLending && form.accountId && (
+                <div className="mt-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      Pilih Sumber Dana:
+                    </p>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Auto-fill using waterfall logic
+                          const amount = parseCurrencyInput(form.amount);
+                          if (amount <= 0 || tagBalances.length === 0) return;
+                          const allocations: DebtFundAllocation[] = [];
+                          let remaining = amount;
+                          for (const tb of tagBalances) {
+                            if (remaining <= 0) break;
+                            const used = Math.min(tb.balance, remaining);
+                            if (used > 0) {
+                              allocations.push({
+                                sourceTag: tb.tag,
+                                amount: used,
+                              });
+                              remaining -= used;
+                            }
+                          }
+                          setForm((prev) => ({ ...prev, allocations }));
+                        }}
+                        disabled={
+                          isSubmitting || parseCurrencyInput(form.amount) <= 0
+                        }
+                        className="text-xs px-2 py-1 rounded bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Auto-fill
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setForm((prev) => ({ ...prev, allocations: [] }))
+                        }
+                        disabled={isSubmitting || form.allocations.length === 0}
+                        className="text-xs px-2 py-1 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </div>
+
+                  {isLoadingTags ? (
+                    <div className="p-3 rounded-lg bg-muted/50 border border-border/50">
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="size-3 animate-spin" />
+                        <span>Memuat sumber dana...</span>
+                      </div>
+                    </div>
+                  ) : tagBalances.length === 0 ? (
+                    <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20">
+                      <p className="text-xs text-amber-700 dark:text-amber-400">
+                        ⚠️ Belum ada sumber dana di akun ini. Tambahkan
+                        pemasukan dengan label terlebih dahulu.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {tagBalances.map((tb, index) => {
+                        const allocatedAmount =
+                          form.allocations.find((a) => a.sourceTag === tb.tag)
+                            ?.amount || 0;
+                        const remainingBalance = tb.balance - allocatedAmount;
+                        const usagePercent =
+                          tb.balance > 0
+                            ? (allocatedAmount / tb.balance) * 100
+                            : 0;
+                        const isUsed = allocatedAmount > 0;
+
+                        const handleAllocationChange = (value: string) => {
+                          const numValue =
+                            parseInt(value.replace(/[^\d]/g, ""), 10) || 0;
+                          const clampedValue = Math.min(numValue, tb.balance);
+                          const newAllocations = form.allocations.filter(
+                            (a) => a.sourceTag !== tb.tag,
+                          );
+                          if (clampedValue > 0) {
+                            newAllocations.push({
+                              sourceTag: tb.tag,
+                              amount: clampedValue,
+                            });
+                          }
+                          setForm((prev) => ({
+                            ...prev,
+                            allocations: newAllocations,
+                          }));
+                        };
+
+                        return (
+                          <div
+                            key={tb.tag}
+                            className={`p-3 rounded-lg border transition-colors ${
+                              isUsed
+                                ? "bg-primary/5 border-primary/30"
+                                : "bg-muted/30 border-border/50"
+                            }`}
+                          >
+                            <div className="flex items-center justify-between gap-2 mb-2">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`text-xs font-medium px-1.5 py-0.5 rounded ${
+                                    isUsed
+                                      ? "bg-primary/10 text-primary"
+                                      : "bg-muted text-muted-foreground"
+                                  }`}
+                                >
+                                  #{index + 1}
+                                </span>
+                                <span className="text-sm font-medium">
+                                  {tb.tag}
+                                </span>
+                              </div>
+                              <span className="text-xs text-muted-foreground">
+                                Saldo: {formatCurrency(tb.balance)}
+                              </span>
+                            </div>
+
+                            {/* Amount input */}
+                            <div className="flex items-center gap-2">
+                              <div className="relative flex-1">
+                                <span className="absolute left-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                                  Rp
+                                </span>
+                                <input
+                                  type="text"
+                                  inputMode="numeric"
+                                  placeholder="0"
+                                  value={
+                                    allocatedAmount > 0
+                                      ? allocatedAmount.toLocaleString("id-ID")
+                                      : ""
+                                  }
+                                  onChange={(e) =>
+                                    handleAllocationChange(e.target.value)
+                                  }
+                                  disabled={isSubmitting}
+                                  className="w-full pl-7 pr-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-50"
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleAllocationChange(String(tb.balance))
+                                }
+                                disabled={isSubmitting}
+                                className="text-xs px-2 py-1.5 rounded border border-border hover:bg-muted disabled:opacity-50 transition-colors"
+                                title="Gunakan semua saldo"
+                              >
+                                Max
+                              </button>
+                            </div>
+
+                            {/* Progress bar */}
+                            {isUsed && (
+                              <div className="mt-2">
+                                <div className="h-1 bg-muted rounded-full overflow-hidden">
+                                  <div
+                                    className="h-full bg-primary rounded-full transition-all"
+                                    style={{ width: `${usagePercent}%` }}
+                                  />
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Sisa setelah transaksi:{" "}
+                                  {formatCurrency(remainingBalance)}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Summary */}
+                      {(() => {
+                        const targetAmount = parseCurrencyInput(form.amount);
+                        const totalAllocated = form.allocations.reduce(
+                          (sum, a) => sum + a.amount,
+                          0,
+                        );
+                        const totalAvailable = tagBalances.reduce(
+                          (sum, tb) => sum + tb.balance,
+                          0,
+                        );
+                        const difference = targetAmount - totalAllocated;
+                        const isExact = difference === 0;
+                        const isOver = difference < 0;
+
+                        return (
+                          <div
+                            className={`p-3 rounded-lg border ${
+                              isOver
+                                ? "bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20"
+                                : isExact
+                                  ? "bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/20"
+                                  : "bg-muted/30 border-border/50"
+                            }`}
+                          >
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-muted-foreground">
+                                Total tersedia:
+                              </span>
+                              <span className="font-medium">
+                                {formatCurrency(totalAvailable)}
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-xs mb-1">
+                              <span className="text-muted-foreground">
+                                Jumlah pinjaman:
+                              </span>
+                              <span className="font-medium">
+                                {formatCurrency(targetAmount)}
+                              </span>
+                            </div>
+                            <div className="border-t border-border/50 my-2" />
+                            <div className="flex justify-between text-sm">
+                              <span className="font-medium">
+                                Total dialokasikan:
+                              </span>
+                              <span
+                                className={`font-bold ${
+                                  isExact
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : isOver
+                                      ? "text-red-600 dark:text-red-400"
+                                      : "text-amber-600 dark:text-amber-400"
+                                }`}
+                              >
+                                {formatCurrency(totalAllocated)}
+                              </span>
+                            </div>
+                            {!isExact && targetAmount > 0 && (
+                              <p
+                                className={`text-xs mt-1 ${
+                                  isOver
+                                    ? "text-red-600 dark:text-red-400"
+                                    : "text-amber-600 dark:text-amber-400"
+                                }`}
+                              >
+                                {isOver
+                                  ? `⚠️ Kelebihan ${formatCurrency(Math.abs(difference))}`
+                                  : `⚠️ Kurang ${formatCurrency(difference)}`}
+                              </p>
+                            )}
+                            {isExact && targetAmount > 0 && (
+                              <p className="text-xs mt-1 text-emerald-600 dark:text-emerald-400">
+                                ✓ Alokasi sudah pas!
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+
+                  {errors.allocations && (
+                    <p className="text-xs text-red-500">{errors.allocations}</p>
+                  )}
+                </div>
               )}
             </div>
           )}
