@@ -74,6 +74,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Transaction History Page:** Implemented `/finance/transactions` page with:
+  - Monthly summary cards (total transactions, income, expense, net balance).
+  - Filter by transaction type, month, and search query.
+  - Paginated transaction table with type badges and amount styling.
+  - Support for all transaction types including LENDING and REPAYMENT.
 - **Account Detail:** Implemented account detail sheet with transaction history and fund sources.
 - **Transaction Fundings Display:** Show funding source tags (sourceTag) on expense/lending transactions in account detail.
 - **Debug API:** Added `/api/debug-tags` endpoint for diagnosing tag balance issues.

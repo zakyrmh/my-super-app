@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/utils/supabase/server";
 import { prisma } from "@/lib/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -517,9 +518,11 @@ export default async function FinancePage() {
             <CardTitle className="text-base font-semibold">
               Riwayat Transaksi
             </CardTitle>
-            <Button variant="ghost" size="sm" className="text-primary">
-              Lihat Semua
-            </Button>
+            <Link href="/finance/transactions">
+              <Button variant="ghost" size="sm" className="text-primary">
+                Lihat Semua
+              </Button>
+            </Link>
           </div>
         </CardHeader>
         <CardContent>
