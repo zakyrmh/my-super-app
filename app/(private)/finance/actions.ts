@@ -594,11 +594,17 @@ export interface AccountDetail {
   transactionCount: number;
 }
 
+/** Funding source for expense transactions */
+export interface TransactionFundingInfo {
+  sourceTag: string;
+  amount: number;
+}
+
 /** Transaction summary for account detail */
 export interface AccountTransaction {
   id: string;
   date: Date;
-  type: "INCOME" | "EXPENSE" | "TRANSFER";
+  type: "INCOME" | "EXPENSE" | "TRANSFER" | "LENDING" | "REPAYMENT";
   amount: number;
   description: string | null;
   category: string | null;
@@ -607,6 +613,8 @@ export interface AccountTransaction {
   fromAccountName: string | null;
   toAccountId: string | null;
   toAccountName: string | null;
+  /** Funding sources for EXPENSE/LENDING/TRANSFER transactions */
+  fundings: TransactionFundingInfo[];
 }
 
 /**
@@ -716,6 +724,7 @@ export async function getAccountTransactions(
         category: { select: { name: true } },
         fromAccount: { select: { id: true, name: true } },
         toAccount: { select: { id: true, name: true } },
+        fundings: { select: { sourceTag: true, amount: true } },
       },
       orderBy: { date: "desc" },
       ...(limit > 0 ? { take: limit } : {}),
@@ -724,7 +733,12 @@ export async function getAccountTransactions(
     return transactions.map((tx) => ({
       id: tx.id,
       date: tx.date,
-      type: tx.type as "INCOME" | "EXPENSE" | "TRANSFER",
+      type: tx.type as
+        | "INCOME"
+        | "EXPENSE"
+        | "TRANSFER"
+        | "LENDING"
+        | "REPAYMENT",
       amount: Number(tx.amount),
       description: tx.description,
       category: tx.category?.name ?? null,
@@ -733,6 +747,10 @@ export async function getAccountTransactions(
       fromAccountName: tx.fromAccount?.name ?? null,
       toAccountId: tx.toAccountId,
       toAccountName: tx.toAccount?.name ?? null,
+      fundings: tx.fundings.map((f) => ({
+        sourceTag: f.sourceTag,
+        amount: Number(f.amount),
+      })),
     }));
   } catch (error) {
     console.error("Error fetching account transactions:", error);

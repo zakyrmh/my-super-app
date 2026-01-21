@@ -732,7 +732,7 @@ export async function recordPayment(
             description: `Pengembalian dari ${debt.contact.name}`,
             toAccountId: input.accountId,
             isPersonal: true,
-            flowTag: `Pengembalian: ${debt.contact.name}`, // Special tag
+            flowTag: `Pengembalian dari ${debt.contact.name}`, // Match description format for consistency
           },
         });
       } else {
@@ -934,7 +934,7 @@ export async function markDebtAsPaid(
               description: `Pelunasan dari ${debt.contact.name}`,
               toAccountId: accountId,
               isPersonal: true,
-              flowTag: `Pengembalian: ${debt.contact.name}`,
+              flowTag: `Pengembalian dari ${debt.contact.name}`, // Match format for consistency
             },
           });
         } else {
