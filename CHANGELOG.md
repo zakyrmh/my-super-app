@@ -79,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Medical History:** Added `MedicalHistory` model to track diseases, severity (`MedicalSeverity`), status (`MedicalStatus`), and treatments.
   - **Exercise Tracking:** Added `ExerciseLog` model for logging workouts with types (`ExerciseType`), intensity (`ExerciseIntensity`), and stats (duration, calories, distance, heart rate).
 
+### Changed
+
+- **Finance (Robustness):** Refactored `createAccount` to use atomic database transactions.
+  - Initial balance now automatically creates a corresponding "Initial Balance" transaction record (INCOME/EXPENSE) to ensure strict double-entry accounting.
+  - Added support for `creditLimit`, `statementDate`, and `dueDate` during account creation.
+
 ## [0.7.0] - 2026-02-07
 
 ### Added

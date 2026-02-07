@@ -70,24 +70,58 @@ export async function createAccount(
       };
     }
 
-    // 3. Create account in database
-    // Using Prisma's expected types (Decimal fields accept number)
-    const account = await prisma.account.create({
-      data: {
-        name: input.name.trim(),
-        type: input.type,
-        balance: input.balance || 0,
-        userId: user.id,
-        // Credit-specific fields (only set if type is CREDIT)
-        ...(input.type === "CREDIT" && {
-          creditLimit: input.creditLimit ?? undefined,
-          statementDate: input.statementDate ?? undefined,
-          dueDate: input.dueDate ?? undefined,
-        }),
-      },
+    // 3. Create account (Atomic Transaction)
+    // We strictly use a transaction to ensure Initial Balance is recorded as a Transaction history
+    const account = await prisma.$transaction(async (tx) => {
+      // A. Create the account with 0 balance initially
+      const newAccount = await tx.account.create({
+        data: {
+          name: input.name.trim(),
+          type: input.type,
+          balance: 0,
+          userId: user.id,
+          // Credit-specific fields
+          ...(input.type === "CREDIT" && {
+            creditLimit: input.creditLimit ?? undefined,
+            statementDate: input.statementDate ?? undefined,
+            dueDate: input.dueDate ?? undefined,
+          }),
+        },
+      });
+
+      // B. Handle Initial Balance if provided
+      if (input.balance && input.balance !== 0) {
+        const isPositive = input.balance > 0;
+        const amount = Math.abs(input.balance);
+        const type = isPositive ? "INCOME" : "EXPENSE"; // Positive = Income (Asset), Negative = Expense (Debt/Liability start)
+
+        // Create the "Initial Balance" transaction
+        await tx.transaction.create({
+          data: {
+            userId: user.id,
+            type: type,
+            amount: amount,
+            date: new Date(),
+            description: "Initial Balance",
+            // Link to the new account
+            toAccountId: isPositive ? newAccount.id : undefined,
+            fromAccountId: !isPositive ? newAccount.id : undefined,
+            isPersonal: true,
+          },
+        });
+
+        // Update the account balance
+        // Note: For CREDIT accounts, a negative balance means debt, which matches "EXPENSE" logic (money out/owed)
+        await tx.account.update({
+          where: { id: newAccount.id },
+          data: { balance: input.balance },
+        });
+      }
+
+      return newAccount;
     });
 
-    // 4. Revalidate the finance page to show new data
+    // 4. Revalidate the finance page
     revalidatePath("/finance");
 
     return {
@@ -98,7 +132,6 @@ export async function createAccount(
   } catch (error) {
     console.error("Error creating account:", error);
 
-    // Provide more specific error message if available
     const errorMessage =
       error instanceof Error
         ? `Gagal membuat akun: ${error.message}`
