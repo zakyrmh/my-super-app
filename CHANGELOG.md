@@ -84,6 +84,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Finance (Robustness):** Refactored `createAccount` to use atomic database transactions.
   - Initial balance now automatically creates a corresponding "Initial Balance" transaction record (INCOME/EXPENSE) to ensure strict double-entry accounting.
   - Added support for `creditLimit`, `statementDate`, and `dueDate` during account creation.
+- **Finance (Flow Tracking):** Upgraded `createTransaction` (especially INCOME) to use the new `FundingSource` model.
+  - Income transactions now require linking to a specific named Funding Source (e.g., "Salary", "Bonus") instead of a loose string tag.
+  - Expenses and Transfers now accurately track funding depletion using `TransactionFunding` relations.
 
 ## [0.7.0] - 2026-02-07
 

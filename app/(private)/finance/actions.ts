@@ -169,9 +169,13 @@ export interface CreateTransactionInput {
   fromAccountId?: string | null;
   toAccountId?: string | null;
   isPersonal?: boolean;
-  flowTag?: string | null;
+
+  /** Name of the funding source (e.g. "Gaji", "Bonus") - For INCOME only */
+  fundingSourceName?: string | null;
+
   /** Manual fund allocations for EXPENSE (optional - if not provided, auto-allocation is used) */
-  manualAllocations?: { sourceTag: string; amount: number }[] | null;
+  manualAllocations?: { fundingSourceId: string; amount: number }[] | null;
+
   /** Itemized expense details (optional) */
   items?:
     | { name: string; price: number; qty: number; category?: string | null }[]
@@ -228,7 +232,7 @@ export async function getUserAccounts(): Promise<AccountOption[]> {
 // ========================
 
 /**
- * Fetches available fund source tags (with balances) for a specific account.
+ * Fetches available funding sources (with balances) for a specific account.
  * Used to show allocation preview in the transaction form.
  */
 export async function getAccountTagBalances(
@@ -354,8 +358,8 @@ export async function createTransaction(
     }
 
     // 5. Handle EXPENSE and TRANSFER with Fund Allocation
-    // For EXPENSE: tags are consumed (balance decreases)
-    // For TRANSFER: tags are moved from source account to destination account
+    // For EXPENSE: funding sources are consumed (balance checks)
+    // For TRANSFER: funding sources are moved
     let fundingAllocations: FundingAllocation[] = [];
 
     if (
@@ -379,8 +383,20 @@ export async function createTransaction(
             )})`,
           };
         }
-        // Use manual allocations
-        fundingAllocations = input.manualAllocations;
+
+        // Use manual allocations (map structure if needed, or check validity)
+        // Here we assume simpler manual input: [{fundingSourceId, amount}]
+        // We need to map it to FundingAllocation structure which expects sourceName?
+        // Actually, for DB creation we only need ID. But FundingAllocation interface has sourceName.
+        // We can fetch names or just use placeholders if strictly data processing.
+        // For robustness, let's just proceed with IDs. We will cast or adjust types if needed.
+        // However, FundingAllocation interface requires sourceName. Let's just create array with placeholder.
+
+        fundingAllocations = input.manualAllocations.map((ma) => ({
+          fundingSourceId: ma.fundingSourceId,
+          sourceName: "", // Placeholder - not used for DB creation
+          amount: ma.amount,
+        }));
       } else {
         // Auto-allocate using waterfall logic
         try {
@@ -429,30 +445,38 @@ export async function createTransaction(
       }
     }
 
-    // 7. Create transaction and update balances in a transaction
-    // For TRANSFER: determine the flowTag from allocations
-    // If single allocation, use that tag. If multiple, combine them or use primary.
-    let transferFlowTag: string | null = null;
-    if (input.type === "TRANSFER" && fundingAllocations.length > 0) {
-      // For TRANSFER, if only one tag is used, pass it to the destination account
-      // If multiple tags, we need to combine them. For simplicity, use the first/primary tag.
-      // A more complex approach could store multiple tags, but current schema uses single flowTag.
-      if (fundingAllocations.length === 1) {
-        transferFlowTag = fundingAllocations[0].sourceTag;
+    // 7. Handle INCOME Funding Source Resolution
+    let incomeFundingSourceId: string | null = null;
+    if (input.type === "INCOME" && input.fundingSourceName) {
+      const fsName = input.fundingSourceName.trim();
+      // Find or create Funding Source
+      const fundingSource = await prisma.fundingSource.findUnique({
+        where: {
+          userId_name: {
+            userId: user.id,
+            name: fsName,
+          },
+        },
+      });
+
+      if (fundingSource) {
+        incomeFundingSourceId = fundingSource.id;
       } else {
-        // Multiple tags being transferred - use primary (highest amount) tag
-        // The full breakdown is still tracked via TransactionFunding records
-        const primaryAllocation = fundingAllocations.reduce((max, alloc) =>
-          alloc.amount > max.amount ? alloc : max,
-        );
-        transferFlowTag = primaryAllocation.sourceTag;
+        // Create new
+        const newFs = await prisma.fundingSource.create({
+          data: {
+            userId: user.id,
+            name: fsName,
+            type: "INCOME",
+          },
+        });
+        incomeFundingSourceId = newFs.id;
       }
     }
 
+    // 8. Create transaction and update balances in a transaction
     const result = await prisma.$transaction(async (tx) => {
       // Create the transaction record
-      // Note: For EXPENSE, flowTag is NOT set (funding tracked via TransactionFunding)
-      // For TRANSFER, flowTag IS set to carry the tag to the destination account
       const transaction = await tx.transaction.create({
         data: {
           userId: user.id,
@@ -464,15 +488,20 @@ export async function createTransaction(
           fromAccountId: input.fromAccountId || null,
           toAccountId: input.toAccountId || null,
           isPersonal: input.isPersonal ?? true,
-          // flowTag is set for INCOME and TRANSFER (source tracking)
-          flowTag:
-            input.type === "INCOME"
-              ? input.flowTag?.trim() || null
-              : input.type === "TRANSFER"
-                ? transferFlowTag
-                : null,
+          // flowTag logic is REMOVED. Tracking happens via TransactionFunding relations.
         },
       });
+
+      // Create Funding Record for INCOME
+      if (input.type === "INCOME" && incomeFundingSourceId) {
+        await tx.transactionFunding.create({
+          data: {
+            transactionId: transaction.id,
+            fundingSourceId: incomeFundingSourceId,
+            amount: input.amount,
+          },
+        });
+      }
 
       // Handle account balance updates and funding records based on type
       if (input.type === "INCOME" && input.toAccountId) {
@@ -493,7 +522,7 @@ export async function createTransaction(
           await tx.transactionFunding.createMany({
             data: fundingAllocations.map((alloc) => ({
               transactionId: transaction.id,
-              sourceTag: alloc.sourceTag,
+              fundingSourceId: alloc.fundingSourceId, // Use ID relation
               amount: alloc.amount,
             })),
           });
@@ -556,12 +585,14 @@ export async function createTransaction(
         });
 
         // Create TransactionFunding records for TRANSFER
-        // This tracks which tags are being moved from the source account
+        // This tracks which funds are being moved
         if (fundingAllocations.length > 0) {
+          // Note: For transfer, the funding source follows the money.
+          // We just record which source was used.
           await tx.transactionFunding.createMany({
             data: fundingAllocations.map((alloc) => ({
               transactionId: transaction.id,
-              sourceTag: alloc.sourceTag,
+              fundingSourceId: alloc.fundingSourceId,
               amount: alloc.amount,
             })),
           });
@@ -571,7 +602,7 @@ export async function createTransaction(
       return transaction;
     });
 
-    // 8. Revalidate the finance page
+    // 9. Revalidate the finance page
     revalidatePath("/finance");
 
     // Generate success message based on type
@@ -580,9 +611,10 @@ export async function createTransaction(
       successMessage = "Pemasukan berhasil dicatat!";
     } else if (input.type === "EXPENSE") {
       // Include allocation details in success message
-      if (fundingAllocations.length > 0) {
+      if (fundingAllocations.length > 0 && fundingAllocations[0].sourceName) {
+        // Use sourceName if available (from auto-allocation)
         const allocationSummary = fundingAllocations
-          .map((a) => `${a.sourceTag}: Rp ${a.amount.toLocaleString("id-ID")}`)
+          .map((a) => `${a.sourceName}: Rp ${a.amount.toLocaleString("id-ID")}`)
           .join(", ");
         successMessage = `Pengeluaran berhasil dicatat! (${allocationSummary})`;
       } else {
@@ -629,7 +661,7 @@ export interface AccountDetail {
 
 /** Funding source for expense transactions */
 export interface TransactionFundingInfo {
-  sourceTag: string;
+  sourceName: string; // Changed from sourceTag to Source Name via relation
   amount: number;
 }
 
@@ -641,12 +673,12 @@ export interface AccountTransaction {
   amount: number;
   description: string | null;
   category: string | null;
-  flowTag: string | null;
+  // flowTag: string | null; <-- Removed
   fromAccountId: string | null;
   fromAccountName: string | null;
   toAccountId: string | null;
   toAccountName: string | null;
-  /** Funding sources for EXPENSE/LENDING/TRANSFER transactions */
+  /** Funding sources */
   fundings: TransactionFundingInfo[];
 }
 
@@ -757,7 +789,14 @@ export async function getAccountTransactions(
         category: { select: { name: true } },
         fromAccount: { select: { id: true, name: true } },
         toAccount: { select: { id: true, name: true } },
-        fundings: { select: { sourceTag: true, amount: true } },
+        fundings: {
+          select: {
+            amount: true,
+            fundingSource: {
+              select: { name: true },
+            },
+          },
+        },
       },
       orderBy: { date: "desc" },
       ...(limit > 0 ? { take: limit } : {}),
@@ -775,13 +814,12 @@ export async function getAccountTransactions(
       amount: Number(tx.amount),
       description: tx.description,
       category: tx.category?.name ?? null,
-      flowTag: tx.flowTag,
       fromAccountId: tx.fromAccountId,
       fromAccountName: tx.fromAccount?.name ?? null,
       toAccountId: tx.toAccountId,
       toAccountName: tx.toAccount?.name ?? null,
       fundings: tx.fundings.map((f) => ({
-        sourceTag: f.sourceTag,
+        sourceName: f.fundingSource.name,
         amount: Number(f.amount),
       })),
     }));

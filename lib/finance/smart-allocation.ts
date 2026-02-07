@@ -1,13 +1,16 @@
 /**
  * Smart Fund Allocation Logic
  *
- * This module provides utilities for calculating available balances per "Tag"
+ * This module provides utilities for calculating available balances per "Funding Source"
  * and intelligently allocating funds for expense transactions.
  *
  * Business Logic:
- * - Each INCOME transaction can have a `flowTag` (e.g., "Gaji", "Bonus")
- * - When making an EXPENSE, funds are drawn from these tags
- * - Priority: Tags with highest balance are used first (waterfall allocation)
+ * - Money flow is tracked via `FundingSource` entities (e.g. "Gaji Januari", "Bonus").
+ * - `TransactionFunding` records link Transactions to FundingSources.
+ * - Balance per Funding Source per Account is calculated by aggregating:
+ *   - Credits: Transactions coming INTO the account (INCOME, TRANSFER IN) linked to the source.
+ *   - Debits: Transactions going OUT of the account (EXPENSE, TRANSFER OUT) linked to the source.
+ * - Priority: Funding Sources with highest balance are used first (waterfall allocation).
  */
 
 import { prisma } from "@/lib/prisma";
@@ -16,17 +19,19 @@ import { prisma } from "@/lib/prisma";
 // TYPE DEFINITIONS
 // ========================
 
-/** Represents available balance for a specific tag */
+/** Represents available balance for a specific funding source in an account */
 export interface TagBalance {
-  tag: string;
-  credit: number; // Total incoming (from INCOME transactions)
-  debit: number; // Total outgoing (from TransactionFunding)
+  fundingSourceId: string;
+  tagName: string; // The human-readable name of the funding source
+  credit: number; // Total incoming
+  debit: number; // Total outgoing
   balance: number; // credit - debit
 }
 
 /** Represents a funding allocation for an expense */
 export interface FundingAllocation {
-  sourceTag: string;
+  fundingSourceId: string;
+  sourceName: string;
   amount: number;
 }
 
@@ -42,17 +47,12 @@ export interface AllocationResult {
 // ========================
 
 /**
- * Calculates available balance per Tag for a specific account.
+ * Calculates available balance per Funding Source for a specific account.
  *
- * Refactored approach:
- * 1. Query INCOME and REPAYMENT transactions (direct credits via flowTag)
- * 2. Query ALL TransactionFunding records with include transaction
- * 3. Calculate net balance per tag based on transaction type:
- *    - INCOME/REPAYMENT (via flowTag): +amount (credit)
- *    - TRANSFER to this account (via TransactionFunding): +amount (credit)
- *    - EXPENSE from this account (via TransactionFunding): -amount (debit)
- *    - TRANSFER from this account (via TransactionFunding): -amount (debit)
- *    - LENDING from this account (via TransactionFunding): -amount (debit)
+ * Logic:
+ * 1. Query ALL TransactionFunding records where the related Transaction involves this account.
+ * 2. Determine direction (Credit/Debit) based on Transaction type and Account role (Sender/Receiver).
+ * 3. Aggregate by FundingSource.
  *
  * @param accountId - The account ID to calculate balances for
  * @returns Array of TagBalance objects, sorted by balance (highest first)
@@ -60,55 +60,20 @@ export interface AllocationResult {
 export async function calculateTagBalances(
   accountId: string,
 ): Promise<TagBalance[]> {
-  // 1. Get all INCOME transactions for this account with flowTag (direct credit)
-  const incomeTransactions = await prisma.transaction.findMany({
-    where: {
-      type: "INCOME",
-      toAccountId: accountId,
-      flowTag: { not: null },
-    },
-    select: {
-      flowTag: true,
-      amount: true,
-    },
-  });
-
-  // 2. Get all REPAYMENT transactions for this account with flowTag (direct credit)
-  // This includes money returned from loans (piutang) - creates new fund source
-  const repaymentTransactions = await prisma.transaction.findMany({
-    where: {
-      type: "REPAYMENT",
-      toAccountId: accountId,
-      flowTag: { not: null },
-    },
-    select: {
-      flowTag: true,
-      amount: true,
-    },
-  });
-
-  // 3. Query ALL TransactionFunding records related to this account with transaction included
-  // This allows us to determine the direction based on transaction type and account relations
+  // Query all TransactionFunding records related to this account
   const allFundings = await prisma.transactionFunding.findMany({
     where: {
-      OR: [
-        // Outgoing: EXPENSE, LENDING, or TRANSFER from this account
-        {
-          transaction: {
-            fromAccountId: accountId,
-            type: { in: ["EXPENSE", "LENDING", "TRANSFER"] },
-          },
-        },
-        // Incoming: TRANSFER to this account
-        {
-          transaction: {
-            toAccountId: accountId,
-            type: "TRANSFER",
-          },
-        },
-      ],
+      transaction: {
+        OR: [
+          { fromAccountId: accountId }, // Outgoing
+          { toAccountId: accountId }, // Incoming
+        ],
+      },
     },
     include: {
+      fundingSource: {
+        select: { name: true },
+      },
       transaction: {
         select: {
           type: true,
@@ -119,90 +84,53 @@ export async function calculateTagBalances(
     },
   });
 
-  // 4. Build balance map using reduce - calculate net balance per tag
-  // Map structure: tag -> { credit, debit }
-  const tagDataMap = new Map<string, { credit: number; debit: number }>();
+  // Map structure: fundingSourceId -> data
+  const tagDataMap = new Map<
+    string,
+    { name: string; credit: number; debit: number }
+  >();
 
-  // Helper function to get or create tag data
-  const getTagData = (tag: string) => {
-    if (!tagDataMap.has(tag)) {
-      tagDataMap.set(tag, { credit: 0, debit: 0 });
+  // Helper to get or create map entry
+  const getTagData = (id: string, name: string) => {
+    if (!tagDataMap.has(id)) {
+      tagDataMap.set(id, { name, credit: 0, debit: 0 });
     }
-    return tagDataMap.get(tag)!;
+    return tagDataMap.get(id)!;
   };
 
-  // Add credits from INCOME transactions (flowTag based)
-  for (const tx of incomeTransactions) {
-    if (tx.flowTag) {
-      const tagData = getTagData(tx.flowTag);
-      tagData.credit += Number(tx.amount);
-    }
-  }
-
-  // Add credits from REPAYMENT transactions (flowTag based)
-  for (const tx of repaymentTransactions) {
-    if (tx.flowTag) {
-      const tagData = getTagData(tx.flowTag);
-      tagData.credit += Number(tx.amount);
-    }
-  }
-
-  // Process all TransactionFunding records based on transaction type and direction
   for (const funding of allFundings) {
-    const tagData = getTagData(funding.sourceTag);
-    const amount = Number(funding.amount);
-    const txType = funding.transaction.type;
-    const isFromThisAccount = funding.transaction.fromAccountId === accountId;
-    const isToThisAccount = funding.transaction.toAccountId === accountId;
+    const { fundingSourceId, amount } = funding;
+    const sourceName = funding.fundingSource.name;
+    const tx = funding.transaction;
+    const numAmount = Number(amount);
 
-    switch (txType) {
-      case "INCOME":
-      case "REPAYMENT":
-        // These should not have TransactionFunding, but if they do, treat as credit
-        tagData.credit += amount;
-        break;
+    const tagData = getTagData(fundingSourceId, sourceName);
 
-      case "EXPENSE":
-        // Expense always deducts from the source account
-        if (isFromThisAccount) {
-          tagData.debit += amount;
-        }
-        break;
+    // Analyze direction relative to THIS account
+    const isIncoming = tx.toAccountId === accountId;
+    const isOutgoing = tx.fromAccountId === accountId;
 
-      case "LENDING":
-        // Lending money to others - deducts from source account
-        if (isFromThisAccount) {
-          tagData.debit += amount;
-        }
-        break;
-
-      case "TRANSFER":
-        // Transfer: debit from source, credit to destination
-        if (isFromThisAccount) {
-          // Outgoing transfer - deduct from this account
-          tagData.debit += amount;
-        } else if (isToThisAccount) {
-          // Incoming transfer - add to this account
-          tagData.credit += amount;
-        }
-        break;
-
-      default:
-        // Ignore unknown types
-        break;
+    if (isIncoming) {
+      // Money entering this account (INCOME, TRANSFER IN, REPAYMENT)
+      // Note: Even for TRANSFER, if it carries a FundingSource, it adds to that Source's balance in this Account.
+      tagData.credit += numAmount;
+    } else if (isOutgoing) {
+      // Money leaving this account (EXPENSE, TRANSFER OUT, LENDING)
+      tagData.debit += numAmount;
     }
   }
 
-  // 5. Convert map to array and calculate final balance
+  // Convert map to array
   const balances: TagBalance[] = [];
 
-  for (const [tag, data] of tagDataMap) {
+  for (const [id, data] of tagDataMap) {
     const balance = data.credit - data.debit;
 
-    // Only include tags with positive balance (can't spend from negative)
+    // Only include sources with positive balance
     if (balance > 0) {
       balances.push({
-        tag,
+        fundingSourceId: id,
+        tagName: data.name,
         credit: data.credit,
         debit: data.debit,
         balance,
@@ -210,7 +138,7 @@ export async function calculateTagBalances(
     }
   }
 
-  // 6. Sort by balance descending (highest first for priority spending)
+  // Sort by balance descending
   balances.sort((a, b) => b.balance - a.balance);
 
   return balances;
@@ -221,61 +149,52 @@ export async function calculateTagBalances(
 // ========================
 
 /**
- * Allocates funds from available tags using waterfall logic.
- *
- * Algorithm:
- * 1. Get all available tag balances, sorted by highest balance first
- * 2. For each tag (in priority order):
- *    - Use as much as possible from this tag
- *    - If remaining amount > 0, move to next tag
- * 3. If all tags exhausted but amount remains, throw error
+ * Allocates funds from available funding sources using waterfall logic.
  *
  * @param accountId - The account ID to allocate from
  * @param totalAmount - The total amount to allocate
- * @param allowOverdraft - If true, allows allocation even if insufficient funds
- * @returns AllocationResult with breakdown of how funds were allocated
- * @throws Error if insufficient funds and allowOverdraft is false
+ * @param allowOverdraft - If true, allows allocation even if insufficient funds (not implemented yet for strict mode)
+ * @returns AllocationResult
  */
 export async function allocateFundsForExpense(
   accountId: string,
   totalAmount: number,
   allowOverdraft = false,
 ): Promise<AllocationResult> {
-  // 1. Get available tag balances
+  // 1. Get available balances
   const tagBalances = await calculateTagBalances(accountId);
 
   // 2. Calculate total available
   const totalAvailable = tagBalances.reduce((sum, tb) => sum + tb.balance, 0);
 
-  // 3. Check if sufficient funds
+  // 3. Check sufficiency
   if (!allowOverdraft && totalAvailable < totalAmount) {
     throw new Error(
-      `Saldo tidak mencukupi. Dibutuhkan: Rp ${totalAmount.toLocaleString(
+      `Saldo sumber dana tidak mencukupi (Flow Tracked). Dibutuhkan: Rp ${totalAmount.toLocaleString(
         "id-ID",
-      )}, ` + `Tersedia: Rp ${totalAvailable.toLocaleString("id-ID")}`,
+      )}, Tersedia: Rp ${totalAvailable.toLocaleString("id-ID")}`,
     );
   }
 
-  // 4. Perform waterfall allocation
+  // 4. Waterfall allocation
   const allocations: FundingAllocation[] = [];
   let remaining = totalAmount;
 
   for (const tagBalance of tagBalances) {
     if (remaining <= 0) break;
 
-    // Calculate how much to take from this tag
     const amountFromTag = Math.min(tagBalance.balance, remaining);
 
     if (amountFromTag > 0) {
       allocations.push({
-        sourceTag: tagBalance.tag,
+        fundingSourceId: tagBalance.fundingSourceId,
+        sourceName: tagBalance.tagName,
         amount: amountFromTag,
       });
       remaining -= amountFromTag;
     }
   }
 
-  // 5. Calculate shortfall (if any)
   const shortfall = Math.max(0, remaining);
   const totalAllocated = totalAmount - shortfall;
 
@@ -284,61 +203,4 @@ export async function allocateFundsForExpense(
     totalAllocated,
     shortfall,
   };
-}
-
-// ========================
-// HELPER: Get Untagged Balance
-// ========================
-
-/**
- * Calculates the "untagged" balance for an account.
- * This is income that was received without a flowTag.
- *
- * Useful for allowing expenses even when no tags have balance,
- * falling back to the general account balance.
- *
- * @param accountId - The account ID to check
- * @returns The untagged balance amount
- */
-export async function getUntaggedBalance(accountId: string): Promise<number> {
-  // Get account's current balance
-  const account = await prisma.account.findUnique({
-    where: { id: accountId },
-    select: { balance: true },
-  });
-
-  if (!account) {
-    return 0;
-  }
-
-  // Get total tagged balance (what's already tracked via tags)
-  const tagBalances = await calculateTagBalances(accountId);
-  const totalTaggedBalance = tagBalances.reduce(
-    (sum, tb) => sum + tb.balance,
-    0,
-  );
-
-  // Untagged = Account balance - Tagged balance
-  const untagged = Number(account.balance) - totalTaggedBalance;
-  return Math.max(0, untagged);
-}
-
-// ========================
-// HELPER: Create Funding Records
-// ========================
-
-/**
- * Creates TransactionFunding records from allocation results.
- * This is a helper to convert allocation results to Prisma create data.
- *
- * @param allocations - Array of funding allocations
- * @returns Array of create data for TransactionFunding
- */
-export function createFundingRecords(
-  allocations: FundingAllocation[],
-): { amount: number; sourceTag: string }[] {
-  return allocations.map((alloc) => ({
-    amount: alloc.amount,
-    sourceTag: alloc.sourceTag,
-  }));
 }
