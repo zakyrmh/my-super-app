@@ -83,6 +83,8 @@ interface FormState {
   toAccountId: string;
   isPersonal: boolean;
   flowTag: string;
+  fundingSourceName: string;
+  fundingSourceEdited: boolean;
   /** Manual fund allocations for EXPENSE/TRANSFER */
   allocations: ManualAllocation[];
   /** Whether this expense has itemized details */
@@ -910,6 +912,8 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     toAccountId: "",
     isPersonal: true,
     flowTag: "",
+    fundingSourceName: "",
+    fundingSourceEdited: false,
     allocations: [],
     hasItems: false,
     items: [],
@@ -967,6 +971,8 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
         toAccountId: "",
         isPersonal: true,
         flowTag: "",
+        fundingSourceName: "",
+        fundingSourceEdited: false,
         allocations: [],
         hasItems: false,
         items: [],
@@ -995,6 +1001,20 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       setTagBalances([]);
     }
   }, [form.fromAccountId, isExpense, isTransfer]);
+
+  // ========================
+  // AUTO-FILL FUNDING SOURCE (SEMI-AUTOMATIC)
+  // ========================
+
+  React.useEffect(() => {
+    if (isIncome && !form.fundingSourceEdited) {
+      const suggested = generateFlowTag(form.category, form.description);
+      setForm((prev) => ({
+        ...prev,
+        fundingSourceName: suggested,
+      }));
+    }
+  }, [isIncome, form.category, form.description, form.fundingSourceEdited]);
 
   // ========================
   // AI & CATEGORY LOGIC
@@ -1199,12 +1219,6 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
     setServerMessage(null);
 
     try {
-      // Auto-generate flowTag for INCOME transactions
-      const autoFlowTag =
-        form.type === "INCOME"
-          ? generateFlowTag(form.category, form.description)
-          : null;
-
       const input: CreateTransactionInput = {
         type: form.type as TransactionType,
         amount: parseCurrencyInput(form.amount),
@@ -1214,7 +1228,10 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
         fromAccountId: form.fromAccountId || null,
         toAccountId: form.toAccountId || null,
         isPersonal: form.isPersonal,
-        fundingSourceName: autoFlowTag,
+        fundingSourceName:
+          form.fundingSourceName ||
+          generateFlowTag(form.category, form.description),
+
         // Include manual allocations for EXPENSE and TRANSFER transactions
         manualAllocations:
           (form.type === "EXPENSE" || form.type === "TRANSFER") &&
@@ -1538,7 +1555,10 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                 </SelectTrigger>
                 <SelectContent>
                   {accounts
-                    .filter((acc) => acc.id !== form.fromAccountId)
+                    .filter(
+                      (acc) =>
+                        !form.fromAccountId || acc.id !== form.fromAccountId,
+                    )
                     .map((account) => (
                       <SelectItem key={account.id} value={account.id}>
                         <div className="flex items-center justify-between gap-2 w-full">
@@ -1682,6 +1702,43 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Funding Source Name (INCOME Only) */}
+          {isIncome && (
+            <div className="space-y-2 p-3 border rounded-lg bg-emerald-50/50 dark:bg-emerald-500/5">
+              <Label htmlFor="fundingSourceName">
+                Label Sumber Dana{" "}
+                <span className="text-xs text-muted-foreground font-normal">
+                  (misal: Gaji, Bonus, THR)
+                </span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="fundingSourceName"
+                  value={form.fundingSourceName}
+                  onChange={(e) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      fundingSourceName: e.target.value,
+                      fundingSourceEdited: true, // Mark as manually edited
+                    }));
+                  }}
+                  placeholder="Contoh: Gaji Januari"
+                  disabled={isSubmitting}
+                  className="bg-background"
+                />
+                {!form.fundingSourceEdited && form.fundingSourceName && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground italic flex items-center gap-1">
+                    <Sparkles className="size-3 text-amber-500" /> Auto
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Label ini akan digunakan untuk melacak sisa dana dari pemasukan
+                ini.
+              </p>
             </div>
           )}
 

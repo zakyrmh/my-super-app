@@ -88,6 +88,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Income transactions now require linking to a specific named Funding Source (e.g., "Salary", "Bonus") instead of a loose string tag.
   - Expenses and Transfers now accurately track funding depletion using `TransactionFunding` relations.
 - **Finance (Fix):** Resolved build error in Debt module by removing deprecated `flowTag` usage and implementing full `FundingSource` integration for Lending/Borrowing.
+- **Finance (UX):** Added semi-automatic "Funding Source" input in transaction form for Income, giving users control over tag naming while providing smart defaults.
+- **Finance (Fix):** Improved account selection stability in transaction form.
 
 ## [0.7.0] - 2026-02-07
 
