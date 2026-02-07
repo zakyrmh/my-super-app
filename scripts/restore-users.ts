@@ -1,9 +1,6 @@
-// @ts-nocheck
-import { PrismaClient } from "../lib/generated/prisma/client";
+import { prisma } from "../lib/prisma";
 import { readFile } from "fs/promises";
 import { join } from "path";
-
-const prisma = new PrismaClient();
 
 async function main() {
   console.log("Starting restore of User table...");

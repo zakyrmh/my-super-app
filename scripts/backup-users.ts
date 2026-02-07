@@ -1,9 +1,6 @@
-// @ts-nocheck
-import { PrismaClient } from "../lib/generated/prisma/client";
+import { prisma } from "../lib/prisma";
 import { writeFile } from "fs/promises";
 import { join } from "path";
-
-const prisma = new PrismaClient();
 
 async function main() {
   console.log("Starting backup of User table...");

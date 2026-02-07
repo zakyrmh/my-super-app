@@ -387,7 +387,7 @@ export function AccountDetailSheet({
 
                           return (
                             <div
-                              key={tb.tag}
+                              key={tb.tagName}
                               className="p-3 rounded-lg bg-muted/30 border border-border/30"
                             >
                               <div className="flex items-center justify-between mb-2">
@@ -396,7 +396,7 @@ export function AccountDetailSheet({
                                     variant="secondary"
                                     className="text-xs bg-primary/10 text-primary"
                                   >
-                                    {tb.tag}
+                                    {tb.tagName}
                                   </Badge>
                                 </span>
                                 <span className="text-sm font-semibold">
@@ -664,17 +664,7 @@ function TransactionItem({
         <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
           <span>{format(tx.date, "dd MMM", { locale: localeId })}</span>
           {/* Show flowTag for INCOME/REPAYMENT transactions */}
-          {tx.flowTag && (
-            <>
-              <span>•</span>
-              <Badge
-                variant="secondary"
-                className="text-xs py-0 px-1.5 bg-primary/5"
-              >
-                {tx.flowTag}
-              </Badge>
-            </>
-          )}
+
           {/* Show funding source tags for EXPENSE/LENDING transactions */}
           {(tx.type === "EXPENSE" || tx.type === "LENDING") &&
             tx.fundings &&
@@ -688,7 +678,7 @@ function TransactionItem({
                     variant="outline"
                     className="text-xs py-0 px-1.5 bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20"
                   >
-                    {funding.sourceTag}
+                    {funding.sourceName}
                   </Badge>
                 ))}
               </>

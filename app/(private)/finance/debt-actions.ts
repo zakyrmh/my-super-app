@@ -5,6 +5,7 @@ import { createClient } from "@/utils/supabase/server";
 import { prisma } from "@/lib/prisma";
 import {
   calculateTagBalances,
+  allocateFundsForExpense,
   type TagBalance,
 } from "@/lib/finance/smart-allocation";
 
@@ -36,7 +37,7 @@ export interface CreateContactInput {
 
 /** Fund allocation for selecting source tags on LENDING */
 export interface DebtFundAllocation {
-  sourceTag: string;
+  fundingSourceId: string;
   amount: number;
 }
 
@@ -49,7 +50,7 @@ export interface CreateDebtInput {
   contactName?: string | null; // For creating new contact on-the-fly
   description?: string | null;
   dueDate?: string | null; // ISO date string
-  /** Manual fund allocations for LENDING (optional - tracks which tag money comes from) */
+  /** Manual fund allocations for LENDING (optional - tracks which source money comes from) */
   allocations?: DebtFundAllocation[] | null;
 }
 
@@ -135,7 +136,7 @@ export async function getUserAccountsForDebt(): Promise<AccountOption[]> {
 // ========================
 
 /**
- * Fetches available fund source tags (with balances) for a specific account.
+ * Fetches available funding sources (with balances) for a specific account.
  * Used to show allocation preview in the debt form for LENDING.
  */
 export async function getAccountTagBalancesForDebt(
@@ -378,12 +379,13 @@ export async function getDebtSummary(): Promise<DebtSummary> {
  *
  * LENDING (Piutang - teman pinjam uang ke saya):
  * - Saldo akun BERKURANG (uang keluar ke teman)
- * - Tidak tercatat sebagai transaksi pengeluaran
+ * - Record as EXPENSE-like transaction (LENDING type)
+ * - Consumes specific Funding Sources (via allocations or auto)
  *
  * BORROWING (Hutang - saya pinjam uang ke teman):
  * - Saldo akun BERTAMBAH (uang masuk dari teman)
- * - Membuat flowTag baru untuk tracking sumber dana
- * - Tidak tercatat sebagai transaksi pemasukan
+ * - Record as INCOME-like transaction (REPAYMENT/BORROWING type logic)
+ * - Creates/Finds a "Funding Source" named "Pinjaman: ContactName"
  */
 export async function createDebt(
   input: CreateDebtInput,
@@ -435,7 +437,11 @@ export async function createDebt(
       };
     }
 
-    // For LENDING, check if account has sufficient balance
+    // Prepare Allocations for LENDING (Expense-like)
+    // If not provided manual allocations, we should auto-allocate
+    let lendingAllocations: { fundingSourceId: string; amount: number }[] = [];
+
+    // For LENDING, check if account has sufficient balance and prepare allocations
     if (input.type === "LENDING") {
       const currentBalance = Number(account.balance);
       if (currentBalance < input.amount) {
@@ -445,6 +451,42 @@ export async function createDebt(
             "id-ID",
           )}`,
         };
+      }
+
+      // Handle allocations
+      if (input.allocations && input.allocations.length > 0) {
+        // Validate manual
+        const manualTotal = input.allocations.reduce(
+          (sum, a) => sum + a.amount,
+          0,
+        );
+        if (manualTotal !== input.amount) {
+          // Fallback or warning? Let's just use what's given or reject?
+          // Since this is critical logic, let's reject mismatch
+          return {
+            success: false,
+            message: "Total alokasi tidak sesuai jumlah pinjaman.",
+          };
+        }
+        lendingAllocations = input.allocations;
+      } else {
+        // Auto-allocate
+        try {
+          const allocationResult = await allocateFundsForExpense(
+            input.accountId,
+            input.amount,
+            false,
+          );
+          lendingAllocations = allocationResult.allocations;
+        } catch (error) {
+          if (error instanceof Error) {
+            return {
+              success: false,
+              message: `Gagal alokasi dana: ${error.message}`,
+            };
+          }
+          throw error;
+        }
       }
     }
 
@@ -494,6 +536,23 @@ export async function createDebt(
       };
     }
 
+    // Prepare Funding Source for BORROWING (Income-like)
+    // We create a Funding Source named "Pinjaman: ContactName" to track this income
+    let borrowingFundingSourceId: string | null = null;
+    if (input.type === "BORROWING") {
+      const sourceName = `Pinjaman: ${contactName}`;
+      const fs = await prisma.fundingSource.upsert({
+        where: { userId_name: { userId: user.id, name: sourceName } },
+        update: {},
+        create: {
+          userId: user.id,
+          name: sourceName,
+          type: "INCOME", // Treat as income source
+        },
+      });
+      borrowingFundingSourceId = fs.id;
+    }
+
     // Use transaction for atomicity
     const result = await prisma.$transaction(async (tx) => {
       // Create the debt
@@ -518,26 +577,25 @@ export async function createDebt(
         });
 
         // Create a LENDING transaction to track the debt
-        // This is separate from regular EXPENSE transactions
         const lendingTx = await tx.transaction.create({
           data: {
             userId: user.id,
-            type: "LENDING", // Specific type for lending money to others
+            type: "LENDING",
             amount: input.amount,
             date: new Date(),
             description: `Piutang ke ${contactName}`,
             fromAccountId: input.accountId,
             isPersonal: true,
-            flowTag: `Piutang: ${contactName}`, // Tag for tracking
+            // NO flowTag
           },
         });
 
-        // Create TransactionFunding records if allocations are provided
-        if (input.allocations && input.allocations.length > 0) {
+        // Create TransactionFunding records using allocations
+        if (lendingAllocations.length > 0) {
           await tx.transactionFunding.createMany({
-            data: input.allocations.map((alloc) => ({
+            data: lendingAllocations.map((alloc) => ({
               transactionId: lendingTx.id,
-              sourceTag: alloc.sourceTag,
+              fundingSourceId: alloc.fundingSourceId,
               amount: alloc.amount,
             })),
           });
@@ -549,20 +607,29 @@ export async function createDebt(
           data: { balance: { increment: input.amount } },
         });
 
-        // Create a REPAYMENT transaction to track borrowed money
-        // This is separate from regular INCOME transactions
-        await tx.transaction.create({
+        const borrowingTx = await tx.transaction.create({
           data: {
             userId: user.id,
-            type: "REPAYMENT", // Specific type for receiving borrowed money
+            type: "REPAYMENT", // Convention: Incoming debt-related funds
             amount: input.amount,
             date: new Date(),
             description: `Pinjaman dari ${contactName}`,
             toAccountId: input.accountId,
             isPersonal: true,
-            flowTag: `Pinjaman: ${contactName}`, // Special tag for borrowed money
+            // NO flowTag
           },
         });
+
+        // Create Funding Record linking to "Pinjaman: ContactName"
+        if (borrowingFundingSourceId) {
+          await tx.transactionFunding.create({
+            data: {
+              transactionId: borrowingTx.id,
+              fundingSourceId: borrowingFundingSourceId,
+              amount: input.amount,
+            },
+          });
+        }
       }
 
       return debt;
@@ -599,12 +666,13 @@ export async function createDebt(
  *
  * LENDING payment (Teman mengembalikan uang):
  * - Saldo akun BERTAMBAH (uang masuk dari teman)
- * - Membuat flowTag baru untuk tracking sumber dana
- * - Tidak tercatat sebagai transaksi pemasukan reguler
+ * - Record as Review-like (REPAYMENT) transaction
+ * - Creates/Finds Funding Source "Pelunasan: ContactName"
  *
  * BORROWING payment (Saya mengembalikan uang):
  * - Saldo akun BERKURANG (uang keluar ke teman)
- * - Tidak tercatat sebagai transaksi pengeluaran
+ * - Record as LENDING-like transaction (money out)
+ * - Consumes funding sources via auto-allocation
  */
 export async function recordPayment(
   input: RecordPaymentInput,
@@ -686,7 +754,11 @@ export async function recordPayment(
       };
     }
 
-    // For BORROWING payment, check if account has sufficient balance
+    // Logic determination
+    let paymentAllocations: { fundingSourceId: string; amount: number }[] = [];
+    let repaymentFundingSourceId: string | null = null;
+
+    // For BORROWING payment (Paying Debt), we need to allocate funds (Expense-like)
     if (debt.type === "BORROWING") {
       const currentBalance = Number(account.balance);
       if (currentBalance < input.amount) {
@@ -697,6 +769,35 @@ export async function recordPayment(
           )}`,
         };
       }
+
+      // Auto Allocation for payment
+      try {
+        const allocationResult = await allocateFundsForExpense(
+          input.accountId,
+          input.amount,
+          false,
+        );
+        paymentAllocations = allocationResult.allocations;
+      } catch (error) {
+        return {
+          success: false,
+          message: `Gagal alokasi dana untuk pembayaran: ${error instanceof Error ? error.message : "Untracked error"}`,
+        };
+      }
+    } else {
+      // For LENDING payment (Receiving Money), we treat as Income-like
+      // Create Funding Source "Pelunasan: ContactName"
+      const sourceName = `Pelunasan: ${debt.contact.name}`;
+      const fs = await prisma.fundingSource.upsert({
+        where: { userId_name: { userId: user.id, name: sourceName } },
+        update: {},
+        create: {
+          userId: user.id,
+          name: sourceName,
+          type: "INCOME",
+        },
+      });
+      repaymentFundingSourceId = fs.id;
     }
 
     // Calculate new remaining amount
@@ -723,7 +824,7 @@ export async function recordPayment(
         });
 
         // Create a REPAYMENT transaction (friend repays the loan)
-        await tx.transaction.create({
+        const repayTx = await tx.transaction.create({
           data: {
             userId: user.id,
             type: "REPAYMENT", // Friend is repaying the loan
@@ -732,9 +833,20 @@ export async function recordPayment(
             description: `Pengembalian dari ${debt.contact.name}`,
             toAccountId: input.accountId,
             isPersonal: true,
-            flowTag: `Pengembalian dari ${debt.contact.name}`, // Match description format for consistency
+            // NO flowTag
           },
         });
+
+        // Link to Funding Source
+        if (repaymentFundingSourceId) {
+          await tx.transactionFunding.create({
+            data: {
+              transactionId: repayTx.id,
+              fundingSourceId: repaymentFundingSourceId,
+              amount: input.amount,
+            },
+          });
+        }
       } else {
         // HUTANG payment: Uang keluar dari akun (saya mengembalikan)
         await tx.account.update({
@@ -743,7 +855,7 @@ export async function recordPayment(
         });
 
         // Create a LENDING transaction (user repays borrowed money)
-        await tx.transaction.create({
+        const payTx = await tx.transaction.create({
           data: {
             userId: user.id,
             type: "LENDING", // User is paying back the borrowed money
@@ -752,9 +864,20 @@ export async function recordPayment(
             description: `Pembayaran hutang ke ${debt.contact.name}`,
             fromAccountId: input.accountId,
             isPersonal: true,
-            flowTag: `Bayar Hutang: ${debt.contact.name}`,
+            // NO flowTag
           },
         });
+
+        // Create TransactionFunding records from allocation
+        if (paymentAllocations.length > 0) {
+          await tx.transactionFunding.createMany({
+            data: paymentAllocations.map((alloc) => ({
+              transactionId: payTx.id,
+              fundingSourceId: alloc.fundingSourceId,
+              amount: alloc.amount,
+            })),
+          });
+        }
       }
     });
 
@@ -928,13 +1051,13 @@ export async function markDebtAsPaid(
           await tx.transaction.create({
             data: {
               userId: user.id,
-              type: "REPAYMENT", // Friend is repaying the loan
+              type: "REPAYMENT",
               amount: remainingAmount,
               date: new Date(),
-              description: `Pelunasan dari ${debt.contact.name}`,
+              description: `Pelunasan manual dari ${debt.contact.name}`,
               toAccountId: accountId,
               isPersonal: true,
-              flowTag: `Pengembalian dari ${debt.contact.name}`, // Match format for consistency
+              // No flowTag
             },
           });
         } else {
@@ -944,17 +1067,17 @@ export async function markDebtAsPaid(
             data: { balance: { decrement: remainingAmount } },
           });
 
-          // Create LENDING transaction (user fully repays borrowed money)
+          // Create LENDING transaction (user fully repays the loan)
           await tx.transaction.create({
             data: {
               userId: user.id,
-              type: "LENDING", // User is paying back the borrowed money
+              type: "LENDING",
               amount: remainingAmount,
               date: new Date(),
-              description: `Pelunasan hutang ke ${debt.contact.name}`,
+              description: `Pelunasan manual hutang ke ${debt.contact.name}`,
               fromAccountId: accountId,
               isPersonal: true,
-              flowTag: `Bayar Hutang: ${debt.contact.name}`,
+              // No flowTag
             },
           });
         }
@@ -972,16 +1095,15 @@ export async function markDebtAsPaid(
 
     revalidatePath("/finance");
 
-    const typeLabel = debt.type === "LENDING" ? "Piutang" : "Hutang";
     return {
       success: true,
-      message: `${typeLabel} dari ${debt.contact.name} telah dilunasi!`,
+      message: "Pinjaman berhasil ditandai sebagai lunas.",
     };
   } catch (error) {
     console.error("Error marking debt as paid:", error);
     return {
       success: false,
-      message: "Terjadi kesalahan saat memperbarui status pinjaman.",
+      message: "Terjadi kesalahan saat update status pinjaman.",
     };
   }
 }

@@ -60,7 +60,7 @@ interface TransactionFormSheetProps {
 
 /** Manual allocation entry for fund sources */
 interface ManualAllocation {
-  sourceTag: string;
+  fundingSourceId: string;
   amount: number;
 }
 
@@ -206,7 +206,7 @@ function calculateWaterfallAllocation(
     if (remaining <= 0) break;
     const used = Math.min(tb.balance, remaining);
     if (used > 0) {
-      allocations.push({ sourceTag: tb.tag, amount: used });
+      allocations.push({ fundingSourceId: tb.fundingSourceId, amount: used });
       remaining -= used;
     }
   }
@@ -250,7 +250,7 @@ function FundAllocationEditor({
 
   // Get allocation amount for a specific tag
   const getAllocationAmount = (tag: string): number => {
-    const alloc = allocations.find((a) => a.sourceTag === tag);
+    const alloc = allocations.find((a) => a.fundingSourceId === tag);
     return alloc?.amount || 0;
   };
 
@@ -262,12 +262,13 @@ function FundAllocationEditor({
   // Handle allocation change for a specific tag
   const handleAllocationChange = (tag: string, value: string) => {
     const numValue = parseInt(value.replace(/[^\d]/g, ""), 10) || 0;
-    const tagBalance = tagBalances.find((tb) => tb.tag === tag)?.balance || 0;
+    const tagBalance =
+      tagBalances.find((tb) => tb.fundingSourceId === tag)?.balance || 0;
     const clampedValue = Math.min(numValue, tagBalance); // Can't exceed tag balance
 
-    const newAllocations = allocations.filter((a) => a.sourceTag !== tag);
+    const newAllocations = allocations.filter((a) => a.fundingSourceId !== tag);
     if (clampedValue > 0) {
-      newAllocations.push({ sourceTag: tag, amount: clampedValue });
+      newAllocations.push({ fundingSourceId: tag, amount: clampedValue });
     }
     onAllocationsChange(newAllocations);
   };
@@ -338,15 +339,18 @@ function FundAllocationEditor({
       {/* Fund source entries */}
       <div className="space-y-2">
         {tagBalances.map((tb, index) => {
-          const allocatedAmount = getAllocationAmount(tb.tag);
-          const remainingBalance = getRemainingBalance(tb.tag, tb.balance);
+          const allocatedAmount = getAllocationAmount(tb.fundingSourceId);
+          const remainingBalance = getRemainingBalance(
+            tb.fundingSourceId,
+            tb.balance,
+          );
           const usagePercent =
             tb.balance > 0 ? (allocatedAmount / tb.balance) * 100 : 0;
           const isUsed = allocatedAmount > 0;
 
           return (
             <div
-              key={tb.tag}
+              key={tb.fundingSourceId}
               className={`p-3 rounded-lg border transition-colors ${
                 isUsed
                   ? "bg-primary/5 border-primary/30"
@@ -364,7 +368,7 @@ function FundAllocationEditor({
                   >
                     #{index + 1}
                   </span>
-                  <span className="text-sm font-medium">{tb.tag}</span>
+                  <span className="text-sm font-medium">{tb.tagName}</span>
                 </div>
                 <span className="text-xs text-muted-foreground">
                   Saldo: {formatCurrency(tb.balance)}
@@ -387,7 +391,7 @@ function FundAllocationEditor({
                         : ""
                     }
                     onChange={(e) =>
-                      handleAllocationChange(tb.tag, e.target.value)
+                      handleAllocationChange(tb.fundingSourceId, e.target.value)
                     }
                     disabled={disabled}
                     className="w-full pl-7 pr-2 py-1.5 text-sm rounded border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary disabled:opacity-50"
@@ -396,7 +400,10 @@ function FundAllocationEditor({
                 <button
                   type="button"
                   onClick={() =>
-                    handleAllocationChange(tb.tag, String(tb.balance))
+                    handleAllocationChange(
+                      tb.fundingSourceId,
+                      String(tb.balance),
+                    )
                   }
                   disabled={disabled}
                   className="text-xs px-2 py-1.5 rounded border border-border hover:bg-muted disabled:opacity-50 transition-colors"
@@ -1207,7 +1214,7 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
         fromAccountId: form.fromAccountId || null,
         toAccountId: form.toAccountId || null,
         isPersonal: form.isPersonal,
-        flowTag: autoFlowTag,
+        fundingSourceName: autoFlowTag,
         // Include manual allocations for EXPENSE and TRANSFER transactions
         manualAllocations:
           (form.type === "EXPENSE" || form.type === "TRANSFER") &&

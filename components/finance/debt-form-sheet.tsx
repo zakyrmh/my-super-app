@@ -612,7 +612,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
                             const used = Math.min(tb.balance, remaining);
                             if (used > 0) {
                               allocations.push({
-                                sourceTag: tb.tag,
+                                fundingSourceId: tb.fundingSourceId,
                                 amount: used,
                               });
                               remaining -= used;
@@ -658,8 +658,9 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
                     <div className="space-y-2">
                       {tagBalances.map((tb, index) => {
                         const allocatedAmount =
-                          form.allocations.find((a) => a.sourceTag === tb.tag)
-                            ?.amount || 0;
+                          form.allocations.find(
+                            (a) => a.fundingSourceId === tb.fundingSourceId,
+                          )?.amount || 0;
                         const remainingBalance = tb.balance - allocatedAmount;
                         const usagePercent =
                           tb.balance > 0
@@ -672,11 +673,11 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
                             parseInt(value.replace(/[^\d]/g, ""), 10) || 0;
                           const clampedValue = Math.min(numValue, tb.balance);
                           const newAllocations = form.allocations.filter(
-                            (a) => a.sourceTag !== tb.tag,
+                            (a) => a.fundingSourceId !== tb.fundingSourceId,
                           );
                           if (clampedValue > 0) {
                             newAllocations.push({
-                              sourceTag: tb.tag,
+                              fundingSourceId: tb.fundingSourceId,
                               amount: clampedValue,
                             });
                           }
@@ -688,7 +689,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
 
                         return (
                           <div
-                            key={tb.tag}
+                            key={tb.fundingSourceId}
                             className={`p-3 rounded-lg border transition-colors ${
                               isUsed
                                 ? "bg-primary/5 border-primary/30"
@@ -707,7 +708,7 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
                                   #{index + 1}
                                 </span>
                                 <span className="text-sm font-medium">
-                                  {tb.tag}
+                                  {tb.tagName}
                                 </span>
                               </div>
                               <span className="text-xs text-muted-foreground">
