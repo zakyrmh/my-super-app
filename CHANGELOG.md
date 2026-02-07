@@ -70,6 +70,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Monthly Income:** Fixed monthly income calculation.
 
+## [0.7.0] - 2026-02-07
+
+### Added
+
+- **Finance Module:**
+  - **Budgeting:** Added `Budget` model for monthly tracking per category and funding source.
+  - **Recurring Transactions:** Added `RecurringTransaction` model for automated bills/subscriptions with `RecurringInterval`.
+  - **Financial Goals:** Added `FinancialGoal` model for saving targets.
+  - **Wealth Tracking:** Added `NetWorthSnapshot` to track assets vs liabilities over time.
+  - **Funding Sources:** Added `FundingSource` model to distinct income streams (Income, Saving, Other).
+  - **Credit/Paylater Support:** Added `creditLimit`, `statementDate`, and `dueDate` to `Account` model.
+  - **Reconciliation:** Added `reconciliationStatus` to `Transaction` for bank matching.
+
+- **Health Module:**
+  - **Food Logging:** Added `FoodLog` model with support for:
+    - Macro nutrients (Calories, Protein, Carbs, Fat).
+    - Micro nutrients (Fiber, Sugar, Sodium, etc.).
+    - AI Analysis field.
+    - Flexible JSON storage for detailed micronutrients.
+
+- **Vehicle Module:**
+  - **Vehicle Management:** Added `Vehicle` model with odometer tracking.
+  - **Service Logs:** Added `ServiceLog` for maintenance history.
+  - **Fuel Logs:** Added `FuelLog` for fuel consumption tracking.
+
 ## [0.6.0] - 2026-01-21
 
 ### Added

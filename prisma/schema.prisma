@@ -24,13 +24,18 @@ model User {
   createdAt DateTime @default(now())
 
   // Relations
-  accounts     Account[]
-  vehicles     Vehicle[]
-  debts        Debt[]
-  contacts     Contact[]
-  categories   Category[]
-  transactions Transaction[]
-  foodLogs     FoodLog[]
+  accounts              Account[]
+  vehicles              Vehicle[]
+  debts                 Debt[]
+  contacts              Contact[]
+  categories            Category[]
+  transactions          Transaction[]
+  foodLogs              FoodLog[]
+  fundingSources        FundingSource[]
+  budgets               Budget[]
+  recurringTransactions RecurringTransaction[]
+  financialGoals        FinancialGoal[]
+  netWorthSnapshots     NetWorthSnapshot[]
 }
 
 // =======================
@@ -76,39 +81,63 @@ model Transaction {
   amount      Decimal
   description String?
 
-  // Kategori & AI (Sekarang Relation ke Category)
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id])
-  receiptUrl String? // Foto struk di Supabase Storage
 
-  // Logic "Titipan" / Flow
-  isPersonal Boolean @default(true) // False jika bayarin BPJS ortu atau uang lewat
-  flowTag    String? // Label opsional: "Gaji", "Dividen" (untuk tracking sumber dana)
+  receiptUrl String?
 
-  // User Relation (Baru! untuk query cepat)
+  isPersonal Boolean @default(true)
+
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  // Relasi Akun (Transfer logic: From -> To)
   fromAccountId String?
   fromAccount   Account? @relation("SenderAccount", fields: [fromAccountId], references: [id])
-  toAccountId   String?
-  toAccount     Account? @relation("ReceiverAccount", fields: [toAccountId], references: [id])
 
-  // Relasi Item (Belanja Supermarket)
+  toAccountId String?
+  toAccount   Account? @relation("ReceiverAccount", fields: [toAccountId], references: [id])
+
   items    TransactionItem[]
   fundings TransactionFunding[]
+
+  reconciliationStatus ReconciliationStatus @default(PENDING)
 
   createdAt DateTime @default(now())
 }
 
 model TransactionFunding {
-  id        String  @id @default(uuid())
-  amount    Decimal // Nominal yang diambil (misal: 500.000)
-  sourceTag String // Nama Tag (misal: "Gaji")
+  id     String  @id @default(uuid())
+  amount Decimal
+
+  fundingSourceId String
+  fundingSource   FundingSource @relation(fields: [fundingSourceId], references: [id])
 
   transactionId String
   transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+}
+
+model FundingSource {
+  id   String            @id @default(uuid())
+  name String // "Gaji Januari", "THR 2025", "Bonus Proyek A"
+  type FundingSourceType
+  note String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fundings TransactionFunding[]
+  budgets  Budget[]
+
+  createdAt      DateTime        @default(now())
+  financialGoals FinancialGoal[]
+
+  @@unique([userId, name])
+}
+
+enum FundingSourceType {
+  INCOME
+  SAVING
+  OTHER
 }
 
 enum TransactionType {
@@ -117,6 +146,12 @@ enum TransactionType {
   TRANSFER
   LENDING
   REPAYMENT
+}
+
+enum ReconciliationStatus {
+  PENDING
+  MATCHED
+  ADJUSTED
 }
 
 model TransactionItem {
@@ -161,6 +196,84 @@ model Debt {
 enum DebtType {
   LENDING
   BORROWING
+}
+
+model Budget {
+  id     String  @id @default(uuid())
+  month  Int // 1–12
+  year   Int
+  amount Decimal
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  fundingSourceId String?
+  fundingSource   FundingSource? @relation(fields: [fundingSourceId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([userId, month, year, categoryId, fundingSourceId])
+}
+
+model RecurringTransaction {
+  id     String          @id @default(uuid())
+  type   TransactionType
+  amount Decimal
+  note   String?
+
+  interval RecurringInterval
+  startAt  DateTime
+  endAt    DateTime?
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  fromAccountId String?
+  toAccountId   String?
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+enum RecurringInterval {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model FinancialGoal {
+  id       String    @id @default(uuid())
+  name     String
+  target   Decimal
+  current  Decimal   @default(0)
+  deadline DateTime?
+  note     String?
+
+  fundingSourceId String?
+  fundingSource   FundingSource? @relation(fields: [fundingSourceId], references: [id])
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+model NetWorthSnapshot {
+  id          String  @id @default(uuid())
+  total       Decimal
+  assets      Decimal
+  liabilities Decimal
+
+  date DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 // =======================
@@ -255,7 +368,9 @@ model Category {
   transactions     Transaction[]
   transactionItems TransactionItem[]
 
-  createdAt DateTime @default(now())
+  createdAt             DateTime               @default(now())
+  budgets               Budget[]
+  recurringTransactions RecurringTransaction[]
 
   @@unique([userId, name, type])
 }
