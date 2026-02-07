@@ -36,6 +36,8 @@ model User {
   recurringTransactions RecurringTransaction[]
   financialGoals        FinancialGoal[]
   netWorthSnapshots     NetWorthSnapshot[]
+  medicalHistories      MedicalHistory[]
+  exerciseLogs          ExerciseLog[]
 }
 
 // =======================
@@ -286,19 +288,29 @@ model FoodLog {
   description String?
 
   // 1. Macro Nutrients (Wajib ada kolom sendiri untuk grafik/chart)
-  calories Int? // kkal
-  protein  Float? // gram
-  carbs    Float? // gram
-  fat      Float? // gram
+  calories     Int? // kkal
+  protein      Float? // gram
+  carbs        Float? // gram
+  fat          Float? // gram
+  saturatedFat Float? // gram (Lemak Jenuh)
+  transFat     Float? // gram (Lemak Trans)
+  polyFat      Float? // gram (Lemak Tak Jenuh Ganda)
+  monoFat      Float? // gram (Lemak Tak Jenuh Tunggal)
 
   // 2. Key Micro Nutrients (Penting untuk kesehatan umum)
   fiber       Float? // Serat (gram) -> Penting untuk pencernaan
   sugar       Float? // Gula (gram) -> Penting untuk diabetes/energi
   sodium      Float? // Natrium (mg) -> Penting untuk tekanan darah
   cholesterol Float? // Kolesterol (mg) -> Penting untuk jantung
+  potassium   Float? // Kalium (mg) -> Penting untuk fungsi otot/syaraf
+  calcium     Float? // Kalsium (mg) -> Kesehatan tulang
+  iron        Float? // Zat Besi (mg) -> Kesehatan darah
+  vitaminA    Float? // Vitamin A (IU)
+  vitaminC    Float? // Vitamin C (mg)
+  vitaminD    Float? // Vitamin D (IU)
 
   // 3. Detailed Micronutrients (Flexible JSON)
-  // AI akan menyimpan data seperti: {"vitamin_c": "10mg", "calcium": "5%", "iron": "2mg"}
+  // AI akan menyimpan data seperti: {"vitamin_b12": "2.4mcg", "magnesium": "400mg"}
   micronutrients Json?
 
   // Analisis Teknis AI
@@ -307,6 +319,77 @@ model FoodLog {
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime @default(now())
+}
+
+model MedicalHistory {
+  id        String @id @default(uuid())
+  condition String // Nama penyakit/kondisi (e.g., "Hypertension", "Diabetes Type 2")
+
+  diagnosedDate DateTime? // Tanggal diagnosa
+  status        MedicalStatus   @default(ACTIVE)
+  severity      MedicalSeverity // MILD, MODERATE, SEVERE
+
+  notes     String? @db.Text // Catatan dokter, gejala, pantangan
+  treatment String? // Obat-obatan atau terapi yang dijalani
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum MedicalStatus {
+  ACTIVE // Sedang diderita
+  CURED // Sudah sembuh
+  MANAGED // Terkontrol (kronis tapi stabil)
+  REMISSION // Masa remisi
+}
+
+enum MedicalSeverity {
+  MILD
+  MODERATE
+  SEVERE
+  CRITICAL
+}
+
+model ExerciseLog {
+  id           String       @id @default(uuid())
+  activityName String // Jenis olahraga: "Lari Pagi", "Gym Session-Leg Day"
+  type         ExerciseType
+
+  duration       Int // Durasi dalam menit
+  caloriesBurned Int? // Estimasi kalori terbakar
+
+  // Data spesifik
+  distance     Float? // Jarak dalam KM (untuk lari/sepeda/renang)
+  steps        Int? // Jumlah langkah
+  avgHeartRate Int? // Detak jantung rata-rata (bpm)
+
+  intensity ExerciseIntensity
+  notes     String? // "Lari santai di taman", "Repetisi beban maksimal naik"
+
+  date DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+}
+
+enum ExerciseType {
+  CARDIO // Lari, Renang, Sepeda
+  STRENGTH // Angkat beban, Gym
+  FLEXIBILITY // Yoga, Stretching
+  SPORTS // Basket, Sepak bola, Bulutangkis
+  OTHER
+}
+
+enum ExerciseIntensity {
+  LOW
+  MODERATE
+  HIGH
+  EXTREME
 }
 
 // =======================
