@@ -63,6 +63,7 @@ export interface RecordPaymentInput {
   amount: number;
   accountId: string; // Required: account to debit/credit
   description?: string | null;
+  date?: string | null; // ISO date string - payment date (defaults to today)
 }
 
 /** Debt with contact info for display */
@@ -833,7 +834,7 @@ export async function recordPayment(
             userId: user.id,
             type: "REPAYMENT", // Friend is repaying the loan
             amount: input.amount,
-            date: new Date(),
+            date: input.date ? new Date(input.date) : new Date(),
             description: `Pengembalian dari ${debt.contact.name}`,
             toAccountId: input.accountId,
             isPersonal: true,
@@ -864,7 +865,7 @@ export async function recordPayment(
             userId: user.id,
             type: "LENDING", // User is paying back the borrowed money
             amount: input.amount,
-            date: new Date(),
+            date: input.date ? new Date(input.date) : new Date(),
             description: `Pembayaran hutang ke ${debt.contact.name}`,
             fromAccountId: input.accountId,
             isPersonal: true,

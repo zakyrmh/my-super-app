@@ -101,6 +101,10 @@ function parseCurrencyInput(value: string): number {
   return isNaN(num) ? 0 : num;
 }
 
+function getTodayDateString(): string {
+  return new Date().toISOString().split("T")[0];
+}
+
 // ========================
 // PAYMENT SHEET COMPONENT
 // ========================
@@ -119,6 +123,7 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
   const [amount, setAmount] = React.useState("");
   const [accountId, setAccountId] = React.useState("");
   const [description, setDescription] = React.useState("");
+  const [date, setDate] = React.useState(getTodayDateString());
   const [errors, setErrors] = React.useState<{
     amount?: string;
     account?: string;
@@ -144,6 +149,7 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
       setAmount("");
       setAccountId("");
       setDescription("");
+      setDate(getTodayDateString());
       setErrors({});
       setServerMessage(null);
     }
@@ -161,7 +167,7 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
       newErrors.amount = "Jumlah pembayaran wajib diisi";
     } else if (parsedAmount > debt.remaining) {
       newErrors.amount = `Jumlah melebihi sisa pinjaman (${formatCurrency(
-        debt.remaining
+        debt.remaining,
       )})`;
     }
 
@@ -173,7 +179,7 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
     if (debt.type === "BORROWING" && selectedAccount && parsedAmount > 0) {
       if (parsedAmount > selectedAccount.balance) {
         newErrors.amount = `Saldo tidak cukup. Tersedia: ${formatCurrency(
-          selectedAccount.balance
+          selectedAccount.balance,
         )}`;
       }
     }
@@ -196,6 +202,7 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
         amount: parseCurrencyInput(amount),
         accountId,
         description: description || null,
+        date: date || null,
       });
 
       if (result.success) {
@@ -357,14 +364,14 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
               >
                 {isLending
                   ? `Saldo akan bertambah: ${formatCurrency(
-                      selectedAccount.balance
+                      selectedAccount.balance,
                     )} → ${formatCurrency(
-                      selectedAccount.balance + parseCurrencyInput(amount)
+                      selectedAccount.balance + parseCurrencyInput(amount),
                     )}`
                   : `Saldo akan berkurang: ${formatCurrency(
-                      selectedAccount.balance
+                      selectedAccount.balance,
                     )} → ${formatCurrency(
-                      selectedAccount.balance - parseCurrencyInput(amount)
+                      selectedAccount.balance - parseCurrencyInput(amount),
                     )}`}
               </p>
             )}
@@ -383,6 +390,25 @@ function PaymentSheet({ debt, trigger }: PaymentSheetProps) {
               onChange={(e) => setDescription(e.target.value)}
               disabled={isSubmitting}
             />
+          </div>
+
+          {/* Payment Date */}
+          <div className="space-y-2">
+            <Label htmlFor="paymentDate">
+              Tanggal Pembayaran <span className="text-red-500">*</span>
+            </Label>
+            <div className="relative">
+              <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                id="paymentDate"
+                type="date"
+                className="pl-9"
+                max={getTodayDateString()}
+                value={date}
+                onChange={(e) => setDate(e.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
           </div>
 
           {/* Server Message */}
