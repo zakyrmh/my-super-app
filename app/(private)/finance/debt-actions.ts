@@ -761,7 +761,6 @@ export async function recordPayment(
 
     // Logic determination
     let paymentAllocations: { fundingSourceId: string; amount: number }[] = [];
-    let repaymentFundingSourceId: string | null = null;
 
     // For BORROWING payment (Paying Debt), we need to allocate funds (Expense-like)
     if (debt.type === "BORROWING") {
@@ -789,36 +788,50 @@ export async function recordPayment(
           message: `Gagal alokasi dana untuk pembayaran: ${error instanceof Error ? error.message : "Untracked error"}`,
         };
       }
-    } else {
-      // For LENDING payment (Receiving Money), we treat as Income-like
-      // Create Funding Source "Pelunasan: ContactName"
-      const sourceName = `Pelunasan: ${debt.contact.name}`;
-      const fs = await prisma.fundingSource.upsert({
-        where: { userId_name: { userId: user.id, name: sourceName } },
-        update: {},
-        create: {
-          userId: user.id,
-          name: sourceName,
-          type: "INCOME",
-        },
-      });
-      repaymentFundingSourceId = fs.id;
     }
 
     // Calculate new remaining amount
     const newRemaining = currentRemaining - input.amount;
     const isNowPaid = newRemaining <= 0;
 
-    // Use transaction for atomicity
+    // Use transaction for atomicity - ALL database operations must be inside
     await prisma.$transaction(async (tx) => {
-      // Update the debt
-      await tx.debt.update({
-        where: { id: input.debtId },
+      // For LENDING payment (Receiving Money), create/get Funding Source INSIDE transaction
+      let repaymentFundingSourceId: string | null = null;
+      if (debt.type === "LENDING") {
+        const sourceName = `Pelunasan: ${debt.contact.name}`;
+        const fs = await tx.fundingSource.upsert({
+          where: { userId_name: { userId: user.id, name: sourceName } },
+          update: {},
+          create: {
+            userId: user.id,
+            name: sourceName,
+            type: "INCOME",
+          },
+        });
+        repaymentFundingSourceId = fs.id;
+      }
+
+      // Update the debt - use optimistic locking by checking current state
+      const updatedDebt = await tx.debt.updateMany({
+        where: {
+          id: input.debtId,
+          userId: user.id,
+          isPaid: false, // Ensure it's still unpaid (optimistic lock)
+          remaining: { gte: input.amount }, // Ensure sufficient remaining
+        },
         data: {
           remaining: newRemaining,
           isPaid: isNowPaid,
         },
       });
+
+      // If no rows updated, the debt state changed (race condition detected)
+      if (updatedDebt.count === 0) {
+        throw new Error(
+          "Pembayaran gagal: Status pinjaman berubah. Silakan refresh dan coba lagi.",
+        );
+      }
 
       // Update account balance based on debt type
       if (debt.type === "LENDING") {
@@ -835,7 +848,9 @@ export async function recordPayment(
             type: "REPAYMENT", // Friend is repaying the loan
             amount: input.amount,
             date: input.date ? new Date(input.date) : new Date(),
-            description: `Pengembalian dari ${debt.contact.name}`,
+            description:
+              input.description?.trim() ||
+              `Pengembalian dari ${debt.contact.name}`,
             toAccountId: input.accountId,
             isPersonal: true,
             // NO flowTag
@@ -866,7 +881,9 @@ export async function recordPayment(
             type: "LENDING", // User is paying back the borrowed money
             amount: input.amount,
             date: input.date ? new Date(input.date) : new Date(),
-            description: `Pembayaran hutang ke ${debt.contact.name}`,
+            description:
+              input.description?.trim() ||
+              `Pembayaran hutang ke ${debt.contact.name}`,
             fromAccountId: input.accountId,
             isPersonal: true,
             // NO flowTag
