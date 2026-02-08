@@ -16,6 +16,7 @@ import {
   Banknote,
   TrendingUp,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -64,10 +65,14 @@ interface FormState {
   contactId: string;
   contactName: string; // For new contact
   description: string;
+  date: string; // Loan date
   dueDate: string;
   isNewContact: boolean;
   /** Fund allocations for LENDING (tracks which tag money comes from) */
   allocations: DebtFundAllocation[];
+  /** Funding source name for BORROWING (semi-automatic) */
+  fundingSourceName: string;
+  fundingSourceEdited: boolean; // Track if user manually edited the name
 }
 
 interface FormErrors {
@@ -182,9 +187,12 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
     contactId: "",
     contactName: "",
     description: "",
+    date: getTodayDateString(),
     dueDate: "",
     isNewContact: false,
     allocations: [],
+    fundingSourceName: "",
+    fundingSourceEdited: false,
   });
 
   const [errors, setErrors] = React.useState<FormErrors>({});
@@ -212,9 +220,12 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
         contactId: "",
         contactName: "",
         description: "",
+        date: getTodayDateString(),
         dueDate: "",
         isNewContact: false,
         allocations: [],
+        fundingSourceName: "",
+        fundingSourceEdited: false,
       });
       setErrors({});
       setServerMessage(null);
@@ -247,6 +258,29 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
       }
     }
   }, [form.accountId, isLending]);
+
+  // Auto-generate funding source name for BORROWING
+  const isBorrowing = form.type === "BORROWING";
+  React.useEffect(() => {
+    if (isBorrowing && !form.fundingSourceEdited) {
+      const contactName = form.isNewContact
+        ? form.contactName
+        : contacts.find((c) => c.id === form.contactId)?.name || "";
+      if (contactName) {
+        setForm((prev) => ({
+          ...prev,
+          fundingSourceName: `Pinjaman: ${contactName}`,
+        }));
+      }
+    }
+  }, [
+    isBorrowing,
+    form.contactId,
+    form.contactName,
+    form.isNewContact,
+    form.fundingSourceEdited,
+    contacts,
+  ]);
 
   // Get current debt type config
   const currentTypeConfig = DEBT_TYPES.find((t) => t.value === form.type);
@@ -335,12 +369,15 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
         contactId: form.isNewContact ? null : form.contactId || null,
         contactName: form.isNewContact ? form.contactName : null,
         description: form.description || null,
+        date: form.date || null,
         dueDate: form.dueDate || null,
         // Include allocations for LENDING if tag balances exist
         allocations:
           isLending && tagBalances.length > 0 && form.allocations.length > 0
             ? form.allocations
             : null,
+        // Include funding source name for BORROWING
+        fundingSourceName: isBorrowing ? form.fundingSourceName || null : null,
       });
 
       if (result.success) {
@@ -983,6 +1020,62 @@ export function DebtFormSheet({ trigger }: DebtFormSheetProps) {
               disabled={isSubmitting}
             />
           </div>
+
+          {/* Loan Date */}
+          <div className="space-y-2">
+            <Label htmlFor="date">
+              Tanggal Pinjaman <span className="text-red-500">*</span>
+            </Label>
+            <div className="relative">
+              <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+              <Input
+                id="date"
+                type="date"
+                className="pl-9"
+                max={getTodayDateString()}
+                value={form.date}
+                onChange={(e) => handleChange("date", e.target.value)}
+                disabled={isSubmitting}
+              />
+            </div>
+          </div>
+
+          {/* Funding Source Name (BORROWING Only) */}
+          {isBorrowing && (
+            <div className="space-y-2 p-3 border rounded-lg bg-emerald-50/50 dark:bg-emerald-500/5">
+              <Label htmlFor="fundingSourceName">
+                Nama Sumber Dana{" "}
+                <span className="text-xs text-muted-foreground font-normal">
+                  (misal: Pinjaman Keluarga, Pinjaman Teman)
+                </span>
+              </Label>
+              <div className="relative">
+                <Input
+                  id="fundingSourceName"
+                  value={form.fundingSourceName}
+                  onChange={(e) => {
+                    setForm((prev) => ({
+                      ...prev,
+                      fundingSourceName: e.target.value,
+                      fundingSourceEdited: true, // Mark as manually edited
+                    }));
+                  }}
+                  placeholder="Contoh: Pinjaman Keluarga"
+                  disabled={isSubmitting}
+                  className="bg-background"
+                />
+                {!form.fundingSourceEdited && form.fundingSourceName && (
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground italic flex items-center gap-1">
+                    <Sparkles className="size-3 text-amber-500" /> Auto
+                  </span>
+                )}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Label ini akan digunakan untuk melacak sisa dana dari pinjaman
+                ini.
+              </p>
+            </div>
+          )}
 
           {/* Due Date */}
           <div className="space-y-2">

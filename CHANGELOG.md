@@ -90,6 +90,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Finance (Fix):** Resolved build error in Debt module by removing deprecated `flowTag` usage and implementing full `FundingSource` integration for Lending/Borrowing.
 - **Finance (UX):** Added semi-automatic "Funding Source" input in transaction form for Income, giving users control over tag naming while providing smart defaults.
 - **Finance (Fix):** Improved account selection stability in transaction form.
+- **Finance (Breaking):** Expense transactions now **require itemization** - all expenses must have at least one item with name, price, and category.
+- **Finance (UX):** Transaction-level category removed for expenses - category now only exists at item level for better granularity.
+- **Finance (Feature):** Added loan date field to debt/loan tracking - now uses Transaction.date instead of hardcoded current date.
+- **Finance (UX):** Semi-automatic funding source naming for BORROWING - auto-generates "Pinjaman: ContactName" but allows user override for better organization.
 
 ## [0.7.0] - 2026-02-07
 

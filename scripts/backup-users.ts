@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { prisma } from "../lib/prisma";
 import { writeFile } from "fs/promises";
 import { join } from "path";

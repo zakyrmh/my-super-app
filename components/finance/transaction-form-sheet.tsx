@@ -1195,8 +1195,8 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
       }
     }
 
-    // Validate items for itemized EXPENSE
-    if (isExpense && form.hasItems) {
+    // Validate items for EXPENSE - always required
+    if (isExpense) {
       const validItems = form.items.filter(
         (item) => item.name.trim() !== "" && item.price !== "",
       );
@@ -1238,9 +1238,9 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
           form.allocations.length > 0
             ? form.allocations
             : null,
-        // Include itemized expense details
+        // Include itemized expense details - always for EXPENSE
         items:
-          form.type === "EXPENSE" && form.hasItems && form.items.length > 0
+          form.type === "EXPENSE" && form.items.length > 0
             ? form.items
                 .filter((item) => item.name.trim() !== "" && item.price !== "")
                 .map((item) => ({
@@ -1321,6 +1321,20 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                         fromAccountId: "",
                         toAccountId: "",
                         category: "",
+                        // For EXPENSE, always enable items and initialize first item
+                        hasItems: type.value === "EXPENSE",
+                        items:
+                          type.value === "EXPENSE"
+                            ? [
+                                {
+                                  id: `item-${Date.now()}`,
+                                  name: "",
+                                  price: "",
+                                  qty: 1,
+                                  category: "",
+                                },
+                              ]
+                            : [],
                       }));
                     }}
                     className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border transition-all ${
@@ -1341,77 +1355,47 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
             )}
           </div>
 
-          {/* Amount */}
+          {/* Amount / Items */}
           <div className="space-y-2">
-            <Label htmlFor="amount">
-              Jumlah <span className="text-red-500">*</span>
-            </Label>
-
-            {/* Itemized expense toggle - only for EXPENSE */}
-            {isExpense && (
-              <div className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border/50">
-                <span className="text-sm text-muted-foreground">
-                  Rincian per item
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const newHasItems = !form.hasItems;
-                    setForm((prev) => ({
-                      ...prev,
-                      hasItems: newHasItems,
-                      // If enabling items and no items yet, add first item
-                      items:
-                        newHasItems && prev.items.length === 0
-                          ? [
-                              {
-                                id: `item-${Date.now()}`,
-                                name: "",
-                                price: "",
-                                qty: 1,
-                                category: "",
-                              },
-                            ]
-                          : prev.items,
-                      // Clear amount when switching to items mode
-                      amount: newHasItems ? "" : prev.amount,
-                    }));
-                  }}
-                  disabled={isSubmitting}
-                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary/20 ${
-                    form.hasItems ? "bg-primary" : "bg-muted"
-                  } disabled:opacity-50`}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                      form.hasItems ? "translate-x-6" : "translate-x-1"
-                    }`}
+            {/* For EXPENSE: Always show items editor, no amount input */}
+            {/* For INCOME/TRANSFER: Show amount input */}
+            {!isExpense && (
+              <>
+                <Label htmlFor="amount">
+                  Jumlah <span className="text-red-500">*</span>
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
+                    Rp
+                  </span>
+                  <Input
+                    id="amount"
+                    type="text"
+                    inputMode="numeric"
+                    placeholder="0"
+                    className="pl-10 text-lg font-semibold"
+                    value={form.amount}
+                    onChange={(e) => handleAmountChange(e.target.value)}
+                    disabled={isSubmitting}
                   />
-                </button>
-              </div>
+                </div>
+              </>
             )}
 
-            {/* Amount input - show when NOT using items */}
-            {(!isExpense || !form.hasItems) && (
-              <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
-                  Rp
-                </span>
-                <Input
-                  id="amount"
-                  type="text"
-                  inputMode="numeric"
-                  placeholder="0"
-                  className="pl-10 text-lg font-semibold"
-                  value={form.amount}
-                  onChange={(e) => handleAmountChange(e.target.value)}
-                  disabled={isSubmitting}
-                />
-              </div>
+            {isExpense && (
+              <>
+                <Label>
+                  Rincian Item <span className="text-red-500">*</span>
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Pengeluaran harus memiliki minimal 1 item dengan nama dan
+                  harga.
+                </p>
+              </>
             )}
 
-            {/* Expense Items Editor - show when using items */}
-            {isExpense && form.hasItems && (
+            {/* Expense Items Editor - always show for EXPENSE */}
+            {isExpense && (
               <ExpenseItemsEditor
                 items={form.items}
                 onItemsChange={(items) => {
@@ -1491,20 +1475,27 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {accounts.map((account) => (
-                    <SelectItem key={account.id} value={account.id}>
-                      <div className="flex items-center justify-between gap-2 w-full">
-                        <span>{account.name}</span>
-                        <span className="text-xs text-muted-foreground">
-                          {new Intl.NumberFormat("id-ID", {
-                            style: "currency",
-                            currency: "IDR",
-                            minimumFractionDigits: 0,
-                          }).format(account.balance)}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  {accounts.length === 0 ? (
+                    <div className="px-4 py-2 text-sm text-muted-foreground">
+                      Tidak ada akun tersedia. Silakan buat akun terlebih
+                      dahulu.
+                    </div>
+                  ) : (
+                    accounts.map((account) => (
+                      <SelectItem key={account.id} value={account.id}>
+                        <div className="flex items-center justify-between gap-2 w-full">
+                          <span>{account.name}</span>
+                          <span className="text-xs text-muted-foreground">
+                            {new Intl.NumberFormat("id-ID", {
+                              style: "currency",
+                              currency: "IDR",
+                              minimumFractionDigits: 0,
+                            }).format(account.balance)}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
               {errors.fromAccountId && (
@@ -1554,25 +1545,32 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
                   />
                 </SelectTrigger>
                 <SelectContent>
-                  {accounts
-                    .filter(
-                      (acc) =>
-                        !form.fromAccountId || acc.id !== form.fromAccountId,
-                    )
-                    .map((account) => (
-                      <SelectItem key={account.id} value={account.id}>
-                        <div className="flex items-center justify-between gap-2 w-full">
-                          <span>{account.name}</span>
-                          <span className="text-xs text-muted-foreground">
-                            {new Intl.NumberFormat("id-ID", {
-                              style: "currency",
-                              currency: "IDR",
-                              minimumFractionDigits: 0,
-                            }).format(account.balance)}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
+                  {accounts.length === 0 ? (
+                    <div className="px-4 py-2 text-sm text-muted-foreground">
+                      Tidak ada akun tersedia. Silakan buat akun terlebih
+                      dahulu.
+                    </div>
+                  ) : (
+                    accounts
+                      .filter(
+                        (acc) =>
+                          !form.fromAccountId || acc.id !== form.fromAccountId,
+                      )
+                      .map((account) => (
+                        <SelectItem key={account.id} value={account.id}>
+                          <div className="flex items-center justify-between gap-2 w-full">
+                            <span>{account.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Intl.NumberFormat("id-ID", {
+                                style: "currency",
+                                currency: "IDR",
+                                minimumFractionDigits: 0,
+                              }).format(account.balance)}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))
+                  )}
                 </SelectContent>
               </Select>
               {errors.toAccountId && (
@@ -1593,8 +1591,8 @@ export function TransactionFormSheet({ trigger }: TransactionFormSheetProps) {
             />
           </div>
 
-          {/* Category - Combobox with AI Suggestions */}
-          {(isIncome || isExpense) && (
+          {/* Category - Combobox with AI Suggestions (INCOME only) */}
+          {isIncome && (
             <div className="space-y-2 p-3 border rounded-lg bg-muted/10 relative">
               <div className="flex items-center justify-between mb-1">
                 <Label htmlFor="category" className="flex items-center gap-2">

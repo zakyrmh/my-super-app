@@ -49,9 +49,12 @@ export interface CreateDebtInput {
   contactId?: string | null;
   contactName?: string | null; // For creating new contact on-the-fly
   description?: string | null;
-  dueDate?: string | null; // ISO date string
+  date?: string | null; // ISO date string - loan date (defaults to today)
+  dueDate?: string | null; // ISO date string - due date
   /** Manual fund allocations for LENDING (optional - tracks which source money comes from) */
   allocations?: DebtFundAllocation[] | null;
+  /** Funding source name for BORROWING (semi-automatic, user can override) */
+  fundingSourceName?: string | null;
 }
 
 /** Input data for recording a payment */
@@ -537,10 +540,11 @@ export async function createDebt(
     }
 
     // Prepare Funding Source for BORROWING (Income-like)
-    // We create a Funding Source named "Pinjaman: ContactName" to track this income
+    // Use user-provided name or auto-generate: "Pinjaman: ContactName"
     let borrowingFundingSourceId: string | null = null;
     if (input.type === "BORROWING") {
-      const sourceName = `Pinjaman: ${contactName}`;
+      const sourceName =
+        input.fundingSourceName?.trim() || `Pinjaman: ${contactName}`;
       const fs = await prisma.fundingSource.upsert({
         where: { userId_name: { userId: user.id, name: sourceName } },
         update: {},
@@ -582,7 +586,7 @@ export async function createDebt(
             userId: user.id,
             type: "LENDING",
             amount: input.amount,
-            date: new Date(),
+            date: input.date ? new Date(input.date) : new Date(),
             description: `Piutang ke ${contactName}`,
             fromAccountId: input.accountId,
             isPersonal: true,
@@ -612,7 +616,7 @@ export async function createDebt(
             userId: user.id,
             type: "REPAYMENT", // Convention: Incoming debt-related funds
             amount: input.amount,
-            date: new Date(),
+            date: input.date ? new Date(input.date) : new Date(),
             description: `Pinjaman dari ${contactName}`,
             toAccountId: input.accountId,
             isPersonal: true,
