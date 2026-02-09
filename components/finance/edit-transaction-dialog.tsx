@@ -2,7 +2,14 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Pencil } from "lucide-react";
+import {
+  Loader2,
+  Pencil,
+  TrendingUp,
+  TrendingDown,
+  ArrowRightLeft,
+  Info,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +30,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   getUserAccounts,
   type AccountOption,
@@ -43,7 +52,13 @@ interface EditTransactionDialogProps {
   onSuccess?: () => void;
 }
 
-//========================
+interface FundingSource {
+  id: string;
+  name: string;
+  amount: number;
+}
+
+// ========================
 // MAIN COMPONENT
 // ========================
 
@@ -66,12 +81,16 @@ export function EditTransactionDialog({
   const [category, setCategory] = React.useState("");
   const [fromAccountId, setFromAccountId] = React.useState("");
   const [toAccountId, setToAccountId] = React.useState("");
+  const [fundingSourceName, setFundingSourceName] = React.useState("");
   const [transactionType, setTransactionType] = React.useState<
     "INCOME" | "EXPENSE" | "TRANSFER" | ""
   >("");
 
   // Data
   const [accounts, setAccounts] = React.useState<AccountOption[]>([]);
+  const [originalFundings, setOriginalFundings] = React.useState<
+    FundingSource[]
+  >([]);
 
   const loadTransactionData = React.useCallback(async () => {
     try {
@@ -104,6 +123,18 @@ export function EditTransactionDialog({
       setFromAccountId(txData.fromAccount?.id || "");
       setToAccountId(txData.toAccount?.id || "");
       setAccounts(accountsData);
+
+      // Load funding sources
+      if (txData.fundings && txData.fundings.length > 0) {
+        const fundings = txData.fundings.map((f) => ({
+          id: f.fundingSourceId,
+          name: f.fundingSourceName,
+          amount: f.amount,
+        }));
+        setOriginalFundings(fundings);
+        // Set the first (or primary) funding source name
+        setFundingSourceName(fundings[0]?.name || "");
+      }
     } catch (error) {
       console.error("Error loading transaction:", error);
       setError("Gagal memuat data transaksi");
@@ -166,6 +197,10 @@ export function EditTransactionDialog({
         category: category.trim() || null,
         fromAccountId: fromAccountId || null,
         toAccountId: toAccountId || null,
+        fundingSourceName:
+          transactionType === "INCOME" && fundingSourceName.trim()
+            ? fundingSourceName.trim()
+            : null,
       };
 
       const result = await editTransaction(input);
@@ -196,6 +231,52 @@ export function EditTransactionDialog({
     setAmount(cleaned);
   };
 
+  const getTypeIcon = () => {
+    switch (transactionType) {
+      case "INCOME":
+        return <TrendingUp className="size-4 text-green-600" />;
+      case "EXPENSE":
+        return <TrendingDown className="size-4 text-red-600" />;
+      case "TRANSFER":
+        return <ArrowRightLeft className="size-4 text-blue-600" />;
+      default:
+        return null;
+    }
+  };
+
+  const getTypeBadge = () => {
+    const badges = {
+      INCOME: (
+        <Badge
+          variant="outline"
+          className="bg-green-50 text-green-700 border-green-200"
+        >
+          <TrendingUp className="size-3 mr-1" />
+          Pemasukan
+        </Badge>
+      ),
+      EXPENSE: (
+        <Badge
+          variant="outline"
+          className="bg-red-50 text-red-700 border-red-200"
+        >
+          <TrendingDown className="size-3 mr-1" />
+          Pengeluaran
+        </Badge>
+      ),
+      TRANSFER: (
+        <Badge
+          variant="outline"
+          className="bg-blue-50 text-blue-700 border-blue-200"
+        >
+          <ArrowRightLeft className="size-3 mr-1" />
+          Transfer
+        </Badge>
+      ),
+    };
+    return transactionType ? badges[transactionType] : null;
+  };
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
@@ -205,52 +286,53 @@ export function EditTransactionDialog({
           </Button>
         )}
       </SheetTrigger>
-      <SheetContent side="right" className="w-full sm:max-w-md overflow-y-auto">
-        <SheetHeader>
-          <SheetTitle>Edit Transaksi</SheetTitle>
+      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetHeader className="space-y-3">
+          <div className="flex items-center gap-2">
+            {getTypeIcon()}
+            <SheetTitle>Edit Transaksi</SheetTitle>
+          </div>
           <SheetDescription>
-            Ubah detail transaksi. Pastikan data yang Anda masukkan sudah benar.
+            Ubah detail transaksi. Perubahan akan mempengaruhi saldo akun Anda.
           </SheetDescription>
         </SheetHeader>
 
         {loadingData ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          <div className="flex flex-col items-center justify-center py-12 space-y-4">
+            <Loader2 className="size-10 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Memuat data...</p>
           </div>
         ) : error ? (
           <div className="py-8">
-            <div className="p-4 bg-destructive/10 border border-destructive rounded-lg">
-              <p className="text-sm text-destructive">{error}</p>
+            <div className="p-4 bg-destructive/10 border border-destructive rounded-lg flex items-start gap-3">
+              <Info className="size-5 text-destructive flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-destructive">
+                  Terjadi Kesalahan
+                </p>
+                <p className="text-sm text-destructive/80 mt-1">{error}</p>
+              </div>
             </div>
           </div>
         ) : (
-          <div className="space-y-4 py-6">
-            {/* Transaction Type (Read-only) */}
-            <div className="space-y-2">
-              <Label>Tipe Transaksi</Label>
-              <Input
-                value={
-                  transactionType === "INCOME"
-                    ? "Pemasukan"
-                    : transactionType === "EXPENSE"
-                      ? "Pengeluaran"
-                      : "Transfer"
-                }
-                disabled
-                className="bg-muted"
-              />
-              <p className="text-xs text-muted-foreground">
-                Tipe transaksi tidak dapat diubah
-              </p>
+          <div className="space-y-6 py-6">
+            {/* Transaction Type Badge */}
+            <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+              <span className="text-sm font-medium text-muted-foreground">
+                Tipe Transaksi
+              </span>
+              {getTypeBadge()}
             </div>
+
+            <Separator />
 
             {/* Amount */}
             <div className="space-y-2">
-              <Label htmlFor="amount">
+              <Label htmlFor="amount" className="text-base font-semibold">
                 Jumlah <span className="text-destructive">*</span>
               </Label>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground font-medium">
                   Rp
                 </span>
                 <Input
@@ -258,7 +340,7 @@ export function EditTransactionDialog({
                   value={formatCurrency(amount)}
                   onChange={(e) => handleAmountChange(e.target.value)}
                   placeholder="0"
-                  className="pl-10"
+                  className="pl-12 h-12 text-lg font-semibold"
                   disabled={loading}
                 />
               </div>
@@ -266,7 +348,7 @@ export function EditTransactionDialog({
 
             {/* Date */}
             <div className="space-y-2">
-              <Label htmlFor="date">
+              <Label htmlFor="date" className="text-base font-semibold">
                 Tanggal <span className="text-destructive">*</span>
               </Label>
               <Input
@@ -275,108 +357,174 @@ export function EditTransactionDialog({
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
                 disabled={loading}
+                className="h-11"
               />
             </div>
 
-            {/* From Account (for EXPENSE and TRANSFER) */}
-            {(transactionType === "EXPENSE" ||
-              transactionType === "TRANSFER") && (
-              <div className="space-y-2">
-                <Label htmlFor="fromAccount">
-                  Akun Sumber <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={fromAccountId}
-                  onValueChange={setFromAccountId}
-                  disabled={loading}
-                >
-                  <SelectTrigger id="fromAccount">
-                    <SelectValue placeholder="Pilih akun sumber" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {accounts.map((acc) => (
-                      <SelectItem key={acc.id} value={acc.id}>
-                        {acc.name} (
-                        {new Intl.NumberFormat("id-ID", {
-                          style: "currency",
-                          currency: "IDR",
-                          minimumFractionDigits: 0,
-                        }).format(acc.balance)}
-                        )
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            {/* Accounts Section */}
+            <div className="space-y-4 p-4 bg-muted/30 rounded-lg">
+              <h3 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">
+                Akun Transaksi
+              </h3>
 
-            {/* To Account (for INCOME and TRANSFER) */}
-            {(transactionType === "INCOME" ||
-              transactionType === "TRANSFER") && (
-              <div className="space-y-2">
-                <Label htmlFor="toAccount">
-                  Akun Tujuan <span className="text-destructive">*</span>
-                </Label>
-                <Select
-                  value={toAccountId}
-                  onValueChange={setToAccountId}
-                  disabled={loading}
-                >
-                  <SelectTrigger id="toAccount">
-                    <SelectValue placeholder="Pilih akun tujuan" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {accounts.map((acc) => (
-                      <SelectItem key={acc.id} value={acc.id}>
-                        {acc.name} (
-                        {new Intl.NumberFormat("id-ID", {
-                          style: "currency",
-                          currency: "IDR",
-                          minimumFractionDigits: 0,
-                        }).format(acc.balance)}
-                        )
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+              {/* From Account (for EXPENSE and TRANSFER) */}
+              {(transactionType === "EXPENSE" ||
+                transactionType === "TRANSFER") && (
+                <div className="space-y-2">
+                  <Label htmlFor="fromAccount" className="font-medium">
+                    Dari Akun <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={fromAccountId}
+                    onValueChange={setFromAccountId}
+                    disabled={loading}
+                  >
+                    <SelectTrigger id="fromAccount" className="h-11">
+                      <SelectValue placeholder="Pilih akun sumber" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          <div className="flex items-center justify-between w-full gap-3">
+                            <span className="font-medium">{acc.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Intl.NumberFormat("id-ID", {
+                                style: "currency",
+                                currency: "IDR",
+                                minimumFractionDigits: 0,
+                              }).format(acc.balance)}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
 
-            {/* Category (for INCOME and EXPENSE) */}
-            {transactionType !== "TRANSFER" && (
-              <div className="space-y-2">
-                <Label htmlFor="category">Kategori</Label>
-                <Input
-                  id="category"
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  placeholder="Masukkan kategori"
-                  disabled={loading}
-                />
-              </div>
-            )}
+              {/* To Account (for INCOME and TRANSFER) */}
+              {(transactionType === "INCOME" ||
+                transactionType === "TRANSFER") && (
+                <div className="space-y-2">
+                  <Label htmlFor="toAccount" className="font-medium">
+                    Ke Akun <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={toAccountId}
+                    onValueChange={setToAccountId}
+                    disabled={loading}
+                  >
+                    <SelectTrigger id="toAccount" className="h-11">
+                      <SelectValue placeholder="Pilih akun tujuan" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {accounts.map((acc) => (
+                        <SelectItem key={acc.id} value={acc.id}>
+                          <div className="flex items-center justify-between w-full gap-3">
+                            <span className="font-medium">{acc.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {new Intl.NumberFormat("id-ID", {
+                                style: "currency",
+                                currency: "IDR",
+                                minimumFractionDigits: 0,
+                              }).format(acc.balance)}
+                            </span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+
+            {/* Category and Funding Source */}
+            <div className="space-y-4">
+              {/* Category (for INCOME and EXPENSE) */}
+              {transactionType !== "TRANSFER" && (
+                <div className="space-y-2">
+                  <Label htmlFor="category" className="font-medium">
+                    Kategori
+                  </Label>
+                  <Input
+                    id="category"
+                    value={category}
+                    onChange={(e) => setCategory(e.target.value)}
+                    placeholder="Masukkan kategori"
+                    disabled={loading}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Opsional - untuk memudahkan pelacakan
+                  </p>
+                </div>
+              )}
+
+              {/* Funding Source Name (for INCOME only) */}
+              {transactionType === "INCOME" && (
+                <div className="space-y-2">
+                  <Label htmlFor="fundingSource" className="font-medium">
+                    Sumber Dana
+                  </Label>
+                  <Input
+                    id="fundingSource"
+                    value={fundingSourceName}
+                    onChange={(e) => setFundingSourceName(e.target.value)}
+                    placeholder="e.g. Gaji, Bonus, Freelance"
+                    disabled={loading}
+                    className="h-11"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Label sumber pemasukan untuk pelacakan dana
+                  </p>
+                  {originalFundings.length > 0 && (
+                    <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                      <p className="text-xs font-medium text-blue-900 mb-2">
+                        Sumber Dana Sebelumnya:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {originalFundings.map((f, idx) => (
+                          <Badge
+                            key={idx}
+                            variant="secondary"
+                            className="bg-blue-100 text-blue-900"
+                          >
+                            {f.name}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
 
             {/* Description */}
             <div className="space-y-2">
-              <Label htmlFor="description">Deskripsi</Label>
+              <Label htmlFor="description" className="font-medium">
+                Deskripsi
+              </Label>
               <Input
                 id="description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Tambahkan catatan untuk transaksi ini"
                 disabled={loading}
+                className="h-11"
               />
             </div>
 
+            {/* Error Display */}
             {error && (
-              <div className="p-3 bg-destructive/10 border border-destructive rounded-md">
+              <div className="p-3 bg-destructive/10 border border-destructive rounded-md flex items-start gap-3">
+                <Info className="size-4 text-destructive flex-shrink-0 mt-0.5" />
                 <p className="text-sm text-destructive">{error}</p>
               </div>
             )}
           </div>
         )}
 
-        <SheetFooter className="flex-col sm:flex-row gap-2">
+        <SheetFooter className="flex-col sm:flex-row gap-2 pt-4 border-t">
           <Button
             variant="outline"
             onClick={() => setOpen(false)}

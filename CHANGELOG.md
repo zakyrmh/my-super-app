@@ -28,19 +28,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Race Condition Protection:** Uses optimistic locking to detect and prevent concurrent modification conflicts.
   - **Fund Reallocation:** Automatically reallocates funding sources when editing expenses or transfers.
   - **Debt Balance Sync:** Editing debt amounts automatically adjusts remaining balance proportionally.
+  - **Funding Source Edit:** Users can now edit the funding source name for INCOME transactions.
   - **UI Components:**
-    - `EditTransactionDialog`: Sheet-based form for editing regular transactions.
+    - `EditTransactionDialog`: Enhanced sheet-based form with improved visual design and better UX.
     - `EditDebtDialog`: Sheet-based form for editing debt/lending records.
     - Edit button added to each transaction row in the all transactions page.
+  - **UI Improvements:**
+    - Type-specific badges with icons (Income, Expense, Transfer).
+    - Organized sections with visual separators.
+    - Larger, more prominent amount input field.
+    - Account selector shows current balance for better context.
+    - Original funding source display for INCOME transactions.
+    - Better error messaging with icons.
+    - Improved loading states with spinner and text.
 
 ### Technical Details
 
 - **Files Added:**
   - `app/(private)/finance/edit-actions.ts` - Server actions for all edit operations
-  - `components/finance/edit-transaction-dialog.tsx` - Edit transaction UI component
+  - `components/finance/edit-transaction-dialog.tsx` - Enhanced edit transaction UI component
   - `components/finance/edit-debt-dialog.tsx` - Edit debt UI component
 - **Files Modified:**
-  - `app/(private)/finance/transactions/page.tsx` - Added edit button to transaction rows
+  - `app/(private)/finance/transactions/page.tsx` - Added edit button to transaction rows and fixed category search query
   - `components/finance/index.ts` - Exported new components
 - **ACID Guarantees:**
   - **Atomicity:** All changes succeed or fail together within a single transaction
@@ -59,6 +68,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Double-Entry Accounting:** Edit operations maintain strict double-entry bookkeeping by reversing old entries before applying new ones.
 - **Audit Trail:** Original transaction IDs are preserved, allowing for complete audit history.
 - **Access Control:** All edit actions verify user ownership before allowing modifications.
+
+### Fixed
+
+- **Transaction List:** Fixed category search query in transaction list to use proper Prisma relation query syntax with `is` keyword for nullable relations.
 
 ## [0.9.0] - 2026-02-08
 

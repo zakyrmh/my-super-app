@@ -171,7 +171,13 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
   if (searchQuery) {
     whereClause.OR = [
       { description: { contains: searchQuery, mode: "insensitive" } },
-      { category: { name: { contains: searchQuery, mode: "insensitive" } } },
+      {
+        category: {
+          is: {
+            name: { contains: searchQuery, mode: "insensitive" },
+          },
+        },
+      },
     ];
   }
 
