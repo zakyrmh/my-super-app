@@ -576,10 +576,20 @@ export async function createDebt(
       // Update account balance based on debt type
       if (input.type === "LENDING") {
         // PIUTANG: Uang keluar dari akun (dipinjamkan ke teman)
-        await tx.account.update({
-          where: { id: input.accountId },
+        // ACID Enhancement: Optimistic locking
+        const updatedAccount = await tx.account.updateMany({
+          where: {
+            id: input.accountId,
+            balance: { gte: input.amount },
+          },
           data: { balance: { decrement: input.amount } },
         });
+
+        if (updatedAccount.count === 0) {
+          throw new Error(
+            "Piutang gagal dicatat: Saldo tidak mencukupi atau berubah oleh transaksi lain.",
+          );
+        }
 
         // Create a LENDING transaction to track the debt
         const lendingTx = await tx.transaction.create({
@@ -869,10 +879,20 @@ export async function recordPayment(
         }
       } else {
         // HUTANG payment: Uang keluar dari akun (saya mengembalikan)
-        await tx.account.update({
-          where: { id: input.accountId },
+        // ACID Enhancement: Optimistic locking
+        const updatedAccount = await tx.account.updateMany({
+          where: {
+            id: input.accountId,
+            balance: { gte: input.amount },
+          },
           data: { balance: { decrement: input.amount } },
         });
+
+        if (updatedAccount.count === 0) {
+          throw new Error(
+            "Pembayaran hutang gagal: Saldo tidak mencukupi atau berubah oleh transaksi lain.",
+          );
+        }
 
         // Create a LENDING transaction (user repays borrowed money)
         const payTx = await tx.transaction.create({

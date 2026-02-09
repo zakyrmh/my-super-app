@@ -30,7 +30,10 @@ import {
 } from "lucide-react";
 import { format, startOfMonth, endOfMonth, subMonths } from "date-fns";
 import { id as localeId } from "date-fns/locale";
-import { TransactionFormSheet } from "@/components/finance";
+import {
+  TransactionFormSheet,
+  EditTransactionDialog,
+} from "@/components/finance";
 
 export const metadata: Metadata = {
   title: "Riwayat Transaksi | My Super App",
@@ -474,6 +477,9 @@ export default async function TransactionsPage({ searchParams }: PageProps) {
                         Akun
                       </TableHead>
                       <TableHead className="text-right">Jumlah</TableHead>
+                      <TableHead className="w-[80px] text-center">
+                        Aksi
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -671,6 +677,9 @@ function TransactionRow({
         <span className={`text-sm font-semibold ${getAmountStyle()}`}>
           {formatSignedCurrency(tx.amount, tx.type)}
         </span>
+      </TableCell>
+      <TableCell className="text-center">
+        <EditTransactionDialog transactionId={tx.id} />
       </TableCell>
     </TableRow>
   );

@@ -512,10 +512,21 @@ export async function createTransaction(
         });
       } else if (input.type === "EXPENSE" && input.fromAccountId) {
         // Expense: Subtract from sending account
-        await tx.account.update({
-          where: { id: input.fromAccountId },
+        // ACID Enhancement: Optimistic locking to prevent negative balance
+        const updatedFromAccount = await tx.account.updateMany({
+          where: {
+            id: input.fromAccountId,
+            balance: { gte: input.amount }, // Only update if balance is sufficient
+          },
           data: { balance: { decrement: input.amount } },
         });
+
+        // If no rows updated, insufficient balance (race condition detected)
+        if (updatedFromAccount.count === 0) {
+          throw new Error(
+            "Pengeluaran gagal: Saldo tidak mencukupi atau berubah oleh transaksi lain.",
+          );
+        }
 
         // Create TransactionFunding records for each allocation
         if (fundingAllocations.length > 0) {
@@ -575,10 +586,42 @@ export async function createTransaction(
         input.toAccountId
       ) {
         // Transfer: Subtract from source, add to destination
-        await tx.account.update({
+        // ACID Enhancement: Use optimistic locking to ensure balance integrity
+
+        // Get current balance to validate (within transaction context)
+        const fromAccount = await tx.account.findUnique({
           where: { id: input.fromAccountId },
+          select: { balance: true },
+        });
+
+        if (!fromAccount) {
+          throw new Error("Akun asal tidak ditemukan.");
+        }
+
+        const currentBalance = Number(fromAccount.balance);
+        if (currentBalance < input.amount) {
+          throw new Error(
+            `Saldo tidak mencukupi. Saldo saat ini: Rp ${currentBalance.toLocaleString("id-ID")}, diperlukan: Rp ${input.amount.toLocaleString("id-ID")}`,
+          );
+        }
+
+        // Update FROM account with explicit balance check (prevents negative balance)
+        const updatedFromAccount = await tx.account.updateMany({
+          where: {
+            id: input.fromAccountId,
+            balance: { gte: input.amount }, // Optimistic lock: only update if balance sufficient
+          },
           data: { balance: { decrement: input.amount } },
         });
+
+        // If no rows updated, concurrent transaction changed the balance
+        if (updatedFromAccount.count === 0) {
+          throw new Error(
+            "Transfer gagal: Saldo berubah oleh transaksi lain. Silakan coba lagi.",
+          );
+        }
+
+        // Update TO account
         await tx.account.update({
           where: { id: input.toAccountId },
           data: { balance: { increment: input.amount } },

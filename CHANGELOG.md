@@ -13,6 +13,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Health:** Food image recognition module.
 - **Vehicle:** Predictive maintenance logic based on mileage.
 
+## [0.10.0] - 2026-02-09
+
+### Added
+
+- **Finance (Edit Transactions):** Implemented comprehensive transaction edit functionality with full ACID compliance:
+  - **Edit Regular Transactions:** Users can now edit INCOME, EXPENSE, and TRANSFER transactions directly from the transaction history page.
+  - **Edit Debt Transactions:** Added ability to edit debt/lending details (amount, due date, contact, description).
+  - **Atomic Updates:** All edits use database transactions with proper rollback/replay strategy:
+    - Step 1: Rollback old transaction effects (reverse account balance changes).
+    - Step 2: Apply new transaction with updated values.
+    - Step 3: Update related records (funding sources, items, debt balances).
+  - **Balance Validation:** Prevents edits that would result in negative balances or insufficient funds.
+  - **Race Condition Protection:** Uses optimistic locking to detect and prevent concurrent modification conflicts.
+  - **Fund Reallocation:** Automatically reallocates funding sources when editing expenses or transfers.
+  - **Debt Balance Sync:** Editing debt amounts automatically adjusts remaining balance proportionally.
+  - **UI Components:**
+    - `EditTransactionDialog`: Sheet-based form for editing regular transactions.
+    - `EditDebtDialog`: Sheet-based form for editing debt/lending records.
+    - Edit button added to each transaction row in the all transactions page.
+
+### Technical Details
+
+- **Files Added:**
+  - `app/(private)/finance/edit-actions.ts` - Server actions for all edit operations
+  - `components/finance/edit-transaction-dialog.tsx` - Edit transaction UI component
+  - `components/finance/edit-debt-dialog.tsx` - Edit debt UI component
+- **Files Modified:**
+  - `app/(private)/finance/transactions/page.tsx` - Added edit button to transaction rows
+  - `components/finance/index.ts` - Exported new components
+- **ACID Guarantees:**
+  - **Atomicity:** All changes succeed or fail together within a single transaction
+  - **Consistency:** Balance constraints and business rules are enforced
+  - **Isolation:** Optimistic locking prevents concurrent conflicts
+  - **Durability:** All changes are persisted to PostgreSQL before confirmation
+- **Validation:**
+  - Type-specific validation (account requirements for each transaction type)
+  - Amount validation (must be positive)
+  - Balance sufficiency checks for expenses and transfers
+  - Account relationship validation (transfer recipients cannot be the same)
+- **Error Handling:** User-friendly error messages for validation failures and race conditions
+
+### Security
+
+- **Double-Entry Accounting:** Edit operations maintain strict double-entry bookkeeping by reversing old entries before applying new ones.
+- **Audit Trail:** Original transaction IDs are preserved, allowing for complete audit history.
+- **Access Control:** All edit actions verify user ownership before allowing modifications.
+
+## [0.9.0] - 2026-02-08
+
+### Security
+
+- **Finance (ACID Compliance):** Implemented comprehensive ACID properties for all financial transactions to prevent data corruption and race conditions:
+  - **Optimistic Locking:** Added conditional updates with balance validation to prevent negative balances and detect concurrent transaction conflicts.
+  - **Transfer Transactions:** Enhanced with pre-transaction balance validation and race condition detection using `updateMany` with `WHERE balance >= amount` clause.
+  - **Expense Transactions:** Added optimistic locking to prevent insufficient balance scenarios during concurrent operations.
+  - **Debt Management:**
+    - **LENDING (Create):** Protected account balance updates with optimistic locking when lending money.
+    - **BORROWING Payment:** Added race condition protection when repaying borrowed money.
+  - **Error Handling:** User-friendly error messages for race conditions ("Saldo berubah oleh transaksi lain. Silakan coba lagi.").
+
+### Technical Details
+
+- **Files Modified:**
+  - `app/(private)/finance/actions.ts` - TRANSFER and EXPENSE transactions
+  - `app/(private)/finance/debt-actions.ts` - LENDING create and BORROWING payment
+- **Pattern Used:** Optimistic locking via `updateMany()` with conditional WHERE clause instead of direct `update()`
+- **Database:** Leverages PostgreSQL READ COMMITTED isolation level + application-level optimistic locking
+- **Impact:** Zero breaking changes - all updates are backward compatible
+
+### What This Protects Against
+
+1. **Race Conditions:** Multiple simultaneous transactions can no longer cause balance inconsistencies
+2. **Negative Balances:** Impossible to overdraft accounts even under high concurrent load
+3. **Lost Updates:** Optimistic locking ensures all balance changes are properly sequenced
+4. **Data Corruption:** Full ACID compliance guarantees database integrity
+
 ## [0.1.0] - 2026-01-10
 
 ### Added
